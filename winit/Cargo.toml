@@ -39,7 +39,8 @@ targets = [
 
 # Features are documented in either `lib.rs` or under `winit::platform`.
 [features]
-default = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]
+default = ["gtk"]
+# default = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]
 
 android-game-activity = ["winit-android/game-activity"]
 android-native-activity = ["winit-android/native-activity"]
@@ -60,6 +61,7 @@ wayland-csd-adwaita-notitle = ["winit-wayland/csd-adwaita-notitle"]
 wayland-csd-adwaita-notitlebar = ["winit-wayland/csd-adwaita-notitlebar"]
 wayland-dlopen = ["winit-wayland/dlopen"]
 x11 = ["winit-x11"]
+gtk = ["winit-gtk"]
 
 [build-dependencies]
 cfg_aliases.workspace = true
@@ -96,11 +98,10 @@ winit-win32.workspace = true
 
 # Linux
 [target.'cfg(all(unix, not(any(target_os = "redox", target_family = "wasm", target_os = "android", target_vendor = "apple"))))'.dependencies]
-libc.workspace = true
-rustix = { workspace = true, features = ["std", "thread"] }
-winit-common = { workspace = true, features = ["xkb"] }
+winit-common = { workspace = true, features = ["xkb", "free-unix"] }
 winit-wayland = { workspace = true, optional = true, default-features = false }
 winit-x11 = { workspace = true, optional = true }
+winit-gtk = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "redox")'.dependencies]
 winit-orbital.workspace = true

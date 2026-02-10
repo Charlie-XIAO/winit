@@ -63,7 +63,8 @@
 //!     Ok(())
 //! }
 //! ```
-#![cfg(target_vendor = "apple")] // TODO: Remove once `objc2` allows compiling on all platforms
+// TODO: Remove once `objc2` allows compiling on all platforms
+#![cfg(any(target_vendor = "apple", target_os = "linux"))]
 
 #[macro_use]
 mod util;

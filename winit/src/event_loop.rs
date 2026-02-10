@@ -225,6 +225,7 @@ impl EventLoop {
             orbital_platform,
             x11_platform,
             wayland_platform,
+            gtk_platform,
         ))]
         {
             let result = self.event_loop.run_app_on_demand(&mut app);
@@ -328,6 +329,7 @@ impl AsRawFd for EventLoop {
     android_platform,
     x11_platform,
     wayland_platform,
+    gtk_platform,
     docsrs,
 ))]
 impl winit_core::event_loop::pump_events::EventLoopExtPumpEvents for EventLoop {
@@ -348,6 +350,7 @@ impl winit_core::event_loop::pump_events::EventLoopExtPumpEvents for EventLoop {
     orbital_platform,
     x11_platform,
     wayland_platform,
+    gtk_platform,
     docsrs,
 ))]
 impl winit_core::event_loop::run_on_demand::EventLoopExtRunOnDemand for EventLoop {
@@ -504,6 +507,21 @@ impl winit_x11::EventLoopBuilderExtX11 for EventLoopBuilder {
     #[inline]
     fn with_any_thread(&mut self, any_thread: bool) -> &mut Self {
         self.platform_specific.any_thread = any_thread;
+        self
+    }
+}
+
+#[cfg(gtk_platform)]
+impl winit_gtk::EventLoopBuilderExtGtk for EventLoopBuilder {
+    #[inline]
+    fn with_any_thread(&mut self, any_thread: bool) -> &mut Self {
+        self.platform_specific.any_thread = any_thread;
+        self
+    }
+
+    #[inline]
+    fn with_app_id(&mut self, id: impl Into<String>) -> &mut Self {
+        self.platform_specific.app_id = Some(id.into());
         self
     }
 }

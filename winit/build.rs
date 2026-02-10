@@ -18,6 +18,8 @@ fn main() {
         // Native displays.
         x11_platform: { all(feature = "x11", free_unix, not(redox)) },
         wayland_platform: { all(feature = "wayland", free_unix, not(redox)) },
+        // I added this:
+        gtk_platform: { all(feature = "gtk", free_unix, not(redox)) },
         orbital_platform: { redox },
     }
 

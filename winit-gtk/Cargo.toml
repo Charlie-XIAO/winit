@@ -1,0 +1,30 @@
+[package]
+description = "Winit's GTK backend"
+documentation = "https://docs.rs/winit-gtk"
+edition.workspace = true
+license.workspace = true
+name = "winit-gtk"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[features]
+serde = ["dep:serde", "bitflags/serde", "smol_str/serde", "dpi/serde"]
+
+[dependencies]
+bitflags.workspace = true
+cursor-icon.workspace = true
+dpi.workspace = true
+rwh_06.workspace = true
+serde = { workspace = true, optional = true }
+smol_str.workspace = true
+tracing.workspace = true
+winit-core.workspace = true
+
+# Platform-specific
+gtk = "0.18"
+crossbeam-channel = "0.5"
+winit-common = { workspace = true, features = ["free-unix"] }
+
+[package.metadata.docs.rs]
+all-features = true

@@ -7,6 +7,7 @@ use std::env;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use winit_common::free_unix::is_main_thread;
 pub(crate) use winit_common::xkb::{physicalkey_to_scancode, scancode_to_physicalkey};
 use winit_core::application::ApplicationHandler;
 use winit_core::error::{EventLoopError, NotSupportedError};
@@ -177,21 +178,4 @@ impl AsRawFd for EventLoop {
     fn as_raw_fd(&self) -> RawFd {
         x11_or_wayland!(match self; EventLoop(evlp) => evlp.as_raw_fd())
     }
-}
-
-#[cfg(target_os = "linux")]
-fn is_main_thread() -> bool {
-    rustix::thread::gettid() == rustix::process::getpid()
-}
-
-#[cfg(any(target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd"))]
-fn is_main_thread() -> bool {
-    use libc::pthread_main_np;
-
-    unsafe { pthread_main_np() == 1 }
-}
-
-#[cfg(target_os = "netbsd")]
-fn is_main_thread() -> bool {
-    std::thread::current().name() == Some("main")
 }
