@@ -20,8 +20,10 @@ pub struct Window {}
 impl Window {
     pub(crate) fn new(
         event_loop_window_target: &ActiveEventLoop,
-        mut attributes: WindowAttributes,
+        attributes: WindowAttributes,
     ) -> Result<Self, RequestError> {
+        let _ = event_loop_window_target;
+        let _ = attributes;
         todo!()
     }
 
@@ -30,10 +32,13 @@ impl Window {
     }
 
     pub(crate) fn set_skip_taskbar(&self, skip_taskbar: bool) {
+        let _ = skip_taskbar;
         todo!()
     }
 
     pub(crate) fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
+        let _ = count;
+        let _ = desktop_filename;
         todo!()
     }
 }
@@ -86,6 +91,7 @@ impl CoreWindow for Window {
     }
 
     fn set_outer_position(&self, position: Position) {
+        let _ = position;
         todo!()
     }
 
@@ -94,6 +100,7 @@ impl CoreWindow for Window {
     }
 
     fn request_surface_size(&self, size: Size) -> Option<PhysicalSize<u32>> {
+        let _ = size;
         todo!()
     }
 
@@ -106,10 +113,12 @@ impl CoreWindow for Window {
     }
 
     fn set_min_surface_size(&self, min_size: Option<Size>) {
+        let _ = min_size;
         todo!()
     }
 
     fn set_max_surface_size(&self, max_size: Option<Size>) {
+        let _ = max_size;
         todo!()
     }
 
@@ -118,22 +127,27 @@ impl CoreWindow for Window {
     }
 
     fn set_surface_resize_increments(&self, increments: Option<Size>) {
+        let _ = increments;
         todo!()
     }
 
     fn set_title(&self, title: &str) {
+        let _ = title;
         todo!()
     }
 
     fn set_transparent(&self, transparent: bool) {
+        let _ = transparent;
         todo!()
     }
 
     fn set_blur(&self, blur: bool) {
+        let _ = blur;
         todo!()
     }
 
     fn set_visible(&self, visible: bool) {
+        let _ = visible;
         todo!()
     }
 
@@ -142,6 +156,7 @@ impl CoreWindow for Window {
     }
 
     fn set_resizable(&self, resizable: bool) {
+        let _ = resizable;
         todo!()
     }
 
@@ -150,6 +165,7 @@ impl CoreWindow for Window {
     }
 
     fn set_enabled_buttons(&self, buttons: WindowButtons) {
+        let _ = buttons;
         todo!()
     }
 
@@ -158,6 +174,7 @@ impl CoreWindow for Window {
     }
 
     fn set_minimized(&self, minimized: bool) {
+        let _ = minimized;
         todo!()
     }
 
@@ -166,6 +183,7 @@ impl CoreWindow for Window {
     }
 
     fn set_maximized(&self, maximized: bool) {
+        let _ = maximized;
         todo!()
     }
 
@@ -174,6 +192,7 @@ impl CoreWindow for Window {
     }
 
     fn set_fullscreen(&self, fullscreen: Option<Fullscreen>) {
+        let _ = fullscreen;
         todo!()
     }
 
@@ -182,6 +201,7 @@ impl CoreWindow for Window {
     }
 
     fn set_decorations(&self, decorations: bool) {
+        let _ = decorations;
         todo!()
     }
 
@@ -190,14 +210,17 @@ impl CoreWindow for Window {
     }
 
     fn set_window_level(&self, level: WindowLevel) {
+        let _ = level;
         todo!()
     }
 
     fn set_window_icon(&self, window_icon: Option<Icon>) {
+        let _ = window_icon;
         todo!()
     }
 
     fn request_ime_update(&self, request: ImeRequest) -> Result<(), ImeRequestError> {
+        let _ = request;
         todo!()
     }
 
@@ -214,10 +237,12 @@ impl CoreWindow for Window {
     }
 
     fn request_user_attention(&self, request_type: Option<UserAttentionType>) {
+        let _ = request_type;
         todo!()
     }
 
     fn set_theme(&self, theme: Option<Theme>) {
+        let _ = theme;
         todo!()
     }
 
@@ -226,7 +251,8 @@ impl CoreWindow for Window {
     }
 
     fn set_content_protected(&self, protected: bool) {
-        todo!()
+        let _ = protected;
+        todo!();
     }
 
     fn title(&self) -> String {
@@ -234,19 +260,23 @@ impl CoreWindow for Window {
     }
 
     fn set_cursor(&self, cursor: Cursor) {
+        let _ = cursor;
         todo!()
     }
 
     fn set_cursor_position(&self, position: Position) -> Result<(), RequestError> {
-        todo!()
+        let _ = position;
+        todo!();
     }
 
     fn set_cursor_grab(&self, mode: CursorGrabMode) -> Result<(), RequestError> {
-        todo!()
+        let _ = mode;
+        todo!();
     }
 
     fn set_cursor_visible(&self, visible: bool) {
-        todo!()
+        let _ = visible;
+        todo!();
     }
 
     fn drag_window(&self) -> Result<(), RequestError> {
@@ -254,14 +284,17 @@ impl CoreWindow for Window {
     }
 
     fn drag_resize_window(&self, direction: ResizeDirection) -> Result<(), RequestError> {
-        todo!()
+        let _ = direction;
+        todo!();
     }
 
     fn show_window_menu(&self, position: Position) {
+        let _ = position;
         todo!()
     }
 
     fn set_cursor_hittest(&self, hittest: bool) -> Result<(), RequestError> {
+        let _ = hittest;
         todo!()
     }
 

@@ -4,13 +4,13 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use rwh_06::HasDisplayHandle;
+use gtk::{gdk, gio, glib, prelude::*};
 use winit_common::free_unix::is_main_thread;
 use winit_core::application::ApplicationHandler;
 use winit_core::cursor::{CustomCursor as CoreCustomCursor, CustomCursorSource};
-use winit_core::error::{EventLoopError, RequestError};
+use winit_core::error::{EventLoopError, OsError, RequestError};
 use winit_core::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit_core::event_loop::pump_events::PumpStatus;
 use winit_core::event_loop::{
@@ -21,9 +21,6 @@ use winit_core::event_loop::{
 use winit_core::monitor::MonitorHandle as CoreMonitorHandle;
 use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId};
 
-use gtk::{gdk, gio, glib, prelude::*};
-
-use crate::monitor;
 use crate::window::{Window, WindowRequest};
 
 #[derive(Debug)]
@@ -83,8 +80,8 @@ pub struct ActiveEventLoop {
     pub(crate) app: gtk::Application,
     pub(crate) windows: Rc<RefCell<HashSet<WindowId>>>,
     pub(crate) window_requests_tx: glib::Sender<(WindowId, WindowRequest)>,
-    pub(crate) event_tx: crossbeam_channel::Sender<QueuedEvent>,
-    pub(crate) draw_tx: crossbeam_channel::Sender<WindowId>,
+    pub(crate) events_tx: crossbeam_channel::Sender<QueuedEvent>,
+    pub(crate) redraw_tx: crossbeam_channel::Sender<WindowId>,
 
     control_flow: Cell<ControlFlow>,
     exit_code: Cell<Option<i32>>,
@@ -107,6 +104,8 @@ impl ActiveEventLoop {
     }
 
     pub(crate) fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
+        let _ = count;
+        let _ = desktop_filename;
         todo!()
     }
 }
@@ -129,6 +128,7 @@ impl CoreActiveEventLoop for ActiveEventLoop {
         &self,
         source: CustomCursorSource,
     ) -> Result<CoreCustomCursor, RequestError> {
+        let _ = source;
         todo!()
     }
 
@@ -184,6 +184,7 @@ impl rwh_06::HasDisplayHandle for ActiveEventLoop {
 #[derive(Debug)]
 pub struct EventLoop {
     loop_running: bool,
+    context: glib::MainContext,
     window_target: ActiveEventLoop,
     events_rx: PeekableReceiver<QueuedEvent>,
     redraw_rx: PeekableReceiver<WindowId>,
@@ -207,15 +208,69 @@ impl EventLoop {
         let context = glib::MainContext::default();
         context
             .with_thread_default(|| Self::new_gtk(&context, attributes.app_id.as_deref()))
-            .map_err(|_| {
-                EventLoopError::Os(os_error!("Failed to initialize GTK thread-default context"))
+            .map_err(|e| {
+                EventLoopError::Os(OsError::new(
+                    e.line,
+                    e.filename,
+                    format!("Failed to initialize GTK thread-default context: {}", e.message),
+                ))
             })?
     }
 
     fn new_gtk(context: &glib::MainContext, app_id: Option<&str>) -> Result<Self, EventLoopError> {
         gtk::init().map_err(|e| EventLoopError::Os(os_error!(e)))?;
 
-        todo!()
+        let app = gtk::Application::new(app_id, gio::ApplicationFlags::empty());
+        app.register(None::<&gio::Cancellable>).map_err(|e| EventLoopError::Os(os_error!(e)))?;
+
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let (redraw_tx, redraw_rx) = crossbeam_channel::unbounded();
+
+        let (window_requests_tx, window_requests_rx) =
+            glib::MainContext::channel(glib::Priority::default());
+
+        let proxy_wake_flag = Arc::new(AtomicBool::new(false));
+
+        let display = gdk::Display::default()
+            .ok_or_else(|| EventLoopError::Os(os_error!("GdkDisplay not found")))?;
+        let is_wayland = display.backend().is_wayland();
+
+        let owned_handle = Arc::new(OwnedDisplayHandle {
+            is_wayland,
+            wl_display: None,
+            xlib_display: None,
+            xlib_screen: 0,
+        });
+        let owned_display = CoreOwnedDisplayHandle::new(owned_handle);
+
+        let window_target = ActiveEventLoop {
+            context: context.clone(),
+            display,
+            app,
+            windows: Default::default(),
+            window_requests_tx,
+            events_tx,
+            redraw_tx,
+            control_flow: Default::default(),
+            exit_code: Default::default(),
+            device_events: Default::default(),
+            proxy_wake_flag,
+            owned_display,
+        };
+
+        window_requests_rx.attach(Some(context), move |(id, request)| {
+            let _ = id;
+            let _ = request;
+            todo!()
+        });
+
+        Ok(Self {
+            loop_running: false,
+            context: context.clone(),
+            window_target,
+            events_rx: PeekableReceiver::new(events_rx),
+            redraw_rx: PeekableReceiver::new(redraw_rx),
+        })
     }
 
     pub fn window_target(&self) -> &dyn CoreActiveEventLoop {
@@ -226,6 +281,7 @@ impl EventLoop {
         &mut self,
         app: A,
     ) -> Result<(), EventLoopError> {
+        let _ = app;
         todo!()
     }
 
@@ -234,6 +290,8 @@ impl EventLoop {
         timeout: Option<Duration>,
         app: A,
     ) -> PumpStatus {
+        let _ = timeout;
+        let _ = app;
         todo!()
     }
 }

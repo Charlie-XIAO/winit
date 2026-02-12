@@ -1,11 +1,9 @@
 //! # Winit's GTK backend.
 
-use std::ops::Deref;
-
 use gtk::gdk;
 use winit_core::event_loop::ActiveEventLoop as CoreActiveEventLoop;
 use winit_core::monitor::MonitorHandle;
-use winit_core::window::{PlatformWindowAttributes, Window as CoreWindow, WindowId};
+use winit_core::window::{PlatformWindowAttributes, Window as CoreWindow};
 
 macro_rules! os_error {
     ($error:expr) => {{ winit_core::error::OsError::new(line!(), file!(), $error) }};
