@@ -142,7 +142,7 @@ pub trait MonitorHandleExtGtk {
 impl MonitorHandleExtGtk for MonitorHandle {
     fn gdk_monitor(&self) -> &gdk::Monitor {
         let monitor = self.cast_ref::<GtkMonitorHandle>().unwrap();
-        &*monitor
+        &monitor.0
     }
 }
 

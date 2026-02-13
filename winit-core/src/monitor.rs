@@ -71,6 +71,7 @@ pub trait MonitorHandleProvider: AsAny + fmt::Debug + Send + Sync {
     /// - **Wayland**: This is the ID of the `wl_output` device.
     /// - **X11**: This is the ID of the CRTC.
     /// - **Web**: This is an internal ID not meant for consumption.
+    /// - **GTK**: This is the underlying `GObject` pointer of the GDK monitor.
     fn native_id(&self) -> u64;
 
     /// Returns a human-readable name of the monitor.

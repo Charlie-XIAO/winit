@@ -1,50 +1,46 @@
 use std::{borrow::Cow, ops::Deref};
 
-use dpi::PhysicalPosition;
-use gtk::gdk;
+use dpi::{LogicalPosition, PhysicalPosition};
+use gtk::{
+    gdk::{self, traits::MonitorExt},
+    glib::ObjectType,
+};
 use winit_core::monitor::{MonitorHandleProvider, VideoMode};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MonitorHandle(gdk::Monitor);
+pub struct MonitorHandle(pub(crate) gdk::Monitor);
 
-// TODO: MonitorHandleProvider requires Send + Sync, but are we safe?
 unsafe impl Send for MonitorHandle {}
 unsafe impl Sync for MonitorHandle {}
 
-impl Deref for MonitorHandle {
-    type Target = gdk::Monitor;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 impl MonitorHandleProvider for MonitorHandle {
     fn id(&self) -> u128 {
-        todo!()
+        self.native_id() as _
     }
 
     fn native_id(&self) -> u64 {
-        todo!()
+        self.0.as_ptr() as _
     }
 
     fn name(&self) -> Option<Cow<'_, str>> {
-        todo!()
+        self.0.model().map(|s| Cow::Owned(s.to_string()))
     }
 
     fn position(&self) -> Option<PhysicalPosition<i32>> {
-        todo!()
+        let rect = self.0.geometry();
+        let logical = LogicalPosition::new(rect.x(), rect.y());
+        Some(logical.to_physical(self.scale_factor()))
     }
 
     fn scale_factor(&self) -> f64 {
-        todo!()
+        self.0.scale_factor() as _
     }
 
     fn current_video_mode(&self) -> Option<VideoMode> {
-        todo!()
+        None
     }
 
     fn video_modes(&self) -> Box<dyn Iterator<Item = VideoMode>> {
-        todo!()
+        Box::new(std::iter::empty())
     }
 }

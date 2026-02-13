@@ -22,6 +22,7 @@ use winit_core::event_loop::{
 use winit_core::monitor::MonitorHandle as CoreMonitorHandle;
 use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId};
 
+use crate::monitor::MonitorHandle;
 use crate::window::{Window, WindowRequest};
 
 #[derive(Debug)]
@@ -138,11 +139,16 @@ impl CoreActiveEventLoop for ActiveEventLoop {
     }
 
     fn available_monitors(&self) -> Box<dyn Iterator<Item = CoreMonitorHandle>> {
-        todo!()
+        let n = self.display.n_monitors();
+        let monitors: Vec<_> = (0..n)
+            .filter_map(|i| self.display.monitor(i))
+            .map(|m| CoreMonitorHandle(Arc::new(MonitorHandle(m))))
+            .collect();
+        Box::new(monitors.into_iter())
     }
 
-    fn primary_monitor(&self) -> Option<winit_core::monitor::MonitorHandle> {
-        todo!()
+    fn primary_monitor(&self) -> Option<CoreMonitorHandle> {
+        self.display.primary_monitor().map(|m| CoreMonitorHandle(Arc::new(MonitorHandle(m))))
     }
 
     fn listen_device_events(&self, allowed: DeviceEvents) {
