@@ -1,5 +1,8 @@
 //! # Winit's GTK backend.
 
+#[cfg(all(not(feature = "x11"), not(feature = "wayland")))]
+compile_error!("Please select at least one of the following features: `x11`, `wayland`");
+
 use gtk::gdk;
 use winit_core::event_loop::ActiveEventLoop as CoreActiveEventLoop;
 use winit_core::monitor::MonitorHandle;
@@ -7,6 +10,7 @@ use winit_core::window::{PlatformWindowAttributes, Window as CoreWindow};
 
 macro_rules! os_error {
     ($error:expr) => {{ winit_core::error::OsError::new(line!(), file!(), $error) }};
+    (glib_bool: $error:expr) => {{ winit_core::error::OsError::new($error.line, $error.filename, $error.message) }};
 }
 
 mod event_loop;

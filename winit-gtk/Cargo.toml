@@ -9,7 +9,11 @@ rust-version.workspace = true
 version.workspace = true
 
 [features]
+default = ["x11", "wayland"]
+
 serde = ["dep:serde", "bitflags/serde", "smol_str/serde", "dpi/serde"]
+x11 = ["x11-dl", "gdkx11-sys"]
+wayland = ["gdkwayland-sys"]
 
 [dependencies]
 bitflags.workspace = true
@@ -23,7 +27,11 @@ winit-core.workspace = true
 
 # Platform-specific
 gtk = "0.18"
+gdkx11-sys = { version = "0.18", optional = true }
+gdkwayland-sys = { version = "0.18", optional = true }
 crossbeam-channel = "0.5"
+async-channel = "2.5"
+x11-dl = { workspace = true, optional = true }
 winit-common = { workspace = true, features = ["free-unix"] }
 
 [package.metadata.docs.rs]
