@@ -84,12 +84,12 @@ pub struct ActiveEventLoop {
     pub(crate) window_requests_tx: async_channel::Sender<(WindowId, WindowRequest)>,
     pub(crate) events_tx: crossbeam_channel::Sender<QueuedEvent>,
     pub(crate) redraw_tx: crossbeam_channel::Sender<WindowId>,
+    pub(crate) handle: Arc<OwnedDisplayHandle>,
 
     control_flow: Cell<ControlFlow>,
     exit_code: Cell<Option<i32>>,
     device_events: Cell<DeviceEvents>,
     proxy_wake_flag: Arc<AtomicBool>,
-    owned_display: CoreOwnedDisplayHandle,
 }
 
 impl ActiveEventLoop {
@@ -97,12 +97,8 @@ impl ActiveEventLoop {
         self.exit_code.set(None);
     }
 
-    pub(crate) fn is_wayland(&self) -> bool {
-        self.display.backend().is_wayland()
-    }
-
-    pub(crate) fn is_x11(&self) -> bool {
-        self.display.backend().is_x11()
+    pub(crate) fn backend(&self) -> gdk::Backend {
+        self.display.backend()
     }
 
     pub(crate) fn gtk_app(&self) -> &gtk::Application {
@@ -178,7 +174,7 @@ impl CoreActiveEventLoop for ActiveEventLoop {
     }
 
     fn owned_display_handle(&self) -> CoreOwnedDisplayHandle {
-        self.owned_display.clone()
+        CoreOwnedDisplayHandle::new(self.handle.clone())
     }
 
     fn rwh_06_handle(&self) -> &dyn rwh_06::HasDisplayHandle {
@@ -188,7 +184,7 @@ impl CoreActiveEventLoop for ActiveEventLoop {
 
 impl rwh_06::HasDisplayHandle for ActiveEventLoop {
     fn display_handle(&self) -> Result<rwh_06::DisplayHandle<'_>, rwh_06::HandleError> {
-        self.owned_display.display_handle()
+        self.handle.display_handle()
     }
 }
 
@@ -236,36 +232,7 @@ impl EventLoop {
 
         let display = gdk::Display::default()
             .ok_or_else(|| EventLoopError::Os(os_error!("GdkDisplay not found")))?;
-
-        let backend = display.backend();
-        let owned_handle = if backend.is_wayland() {
-            #[cfg(feature = "wayland")]
-            {
-                let wl = unsafe {
-                    gdk_wayland_sys::gdk_wayland_display_get_wl_display(display.as_ptr() as *mut _)
-                };
-                OwnedDisplayHandle::new_wayland(wl)
-            }
-            #[cfg(not(feature = "wayland"))]
-            panic!("GDK backend is wayland but winit-gtk was built without the `wayland` feature");
-        } else if backend.is_x11() {
-            #[cfg(feature = "x11")]
-            if let Ok(xlib) = x11_dl::xlib::Xlib::open() {
-                let dpy = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
-                let screen = (!dpy.is_null())
-                    .then(|| unsafe { (xlib.XDefaultScreen)(dpy) })
-                    .unwrap_or_default();
-                OwnedDisplayHandle::new_x11(dpy as *mut _, screen)
-            } else {
-                OwnedDisplayHandle::Unavailable
-            }
-            #[cfg(not(feature = "x11"))]
-            panic!("GDK backend is X11 but winit-gtk was built without the `x11` feature");
-        } else {
-            OwnedDisplayHandle::Unavailable
-        };
-
-        let owned_display = CoreOwnedDisplayHandle::new(Arc::new(owned_handle));
+        let handle = OwnedDisplayHandle::new(&display);
 
         let window_target = ActiveEventLoop {
             context: context.clone(),
@@ -275,11 +242,11 @@ impl EventLoop {
             window_requests_tx,
             events_tx,
             redraw_tx,
+            handle: Arc::new(handle),
             control_flow: Default::default(),
             exit_code: Default::default(),
             device_events: Default::default(),
             proxy_wake_flag,
-            owned_display,
         };
 
         context.spawn_local(async move {
@@ -492,7 +459,7 @@ impl EventLoopProxyProvider for EventLoopProxy {
 }
 
 #[derive(Debug)]
-enum OwnedDisplayHandle {
+pub(crate) enum OwnedDisplayHandle {
     Wayland { display: NonNull<c_void> },
     X11 { display: NonNull<c_void>, screen: i32 },
     Unavailable,
@@ -502,17 +469,35 @@ unsafe impl Send for OwnedDisplayHandle {}
 unsafe impl Sync for OwnedDisplayHandle {}
 
 impl OwnedDisplayHandle {
-    fn new_wayland(display: *mut c_void) -> Self {
-        match NonNull::new(display) {
-            Some(display) => Self::Wayland { display },
-            None => Self::Unavailable,
-        }
-    }
+    fn new(display: &gdk::Display) -> Self {
+        let backend = display.backend();
 
-    fn new_x11(display: *mut c_void, screen: i32) -> Self {
-        match NonNull::new(display) {
-            Some(display) => Self::X11 { display, screen },
-            None => Self::Unavailable,
+        if backend.is_wayland() {
+            #[cfg(feature = "wayland")]
+            {
+                let wl = unsafe {
+                    gdk_wayland_sys::gdk_wayland_display_get_wl_display(display.as_ptr() as *mut _)
+                };
+                NonNull::new(wl).map_or(Self::Unavailable, |display| Self::Wayland { display })
+            }
+            #[cfg(not(feature = "wayland"))]
+            panic!("GDK backend is wayland but winit-gtk was built without the `wayland` feature");
+        } else if backend.is_x11() {
+            #[cfg(feature = "x11")]
+            if let Ok(xlib) = x11_dl::xlib::Xlib::open() {
+                let dpy = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
+                let screen = (!dpy.is_null())
+                    .then(|| unsafe { (xlib.XDefaultScreen)(dpy) })
+                    .unwrap_or_default();
+                NonNull::new(dpy as *mut _)
+                    .map_or(Self::Unavailable, |display| Self::X11 { display, screen })
+            } else {
+                Self::Unavailable
+            }
+            #[cfg(not(feature = "x11"))]
+            panic!("GDK backend is X11 but winit-gtk was built without the `x11` feature");
+        } else {
+            Self::Unavailable
         }
     }
 }

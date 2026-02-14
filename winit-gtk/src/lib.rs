@@ -26,16 +26,30 @@ use self::window::Window as GtkWindow;
 ///
 /// [`Window`]: crate::window::Window
 pub trait WindowExtGtk {
+    fn gtk_window(&self) -> &gtk::ApplicationWindow;
     fn default_vbox(&self) -> Option<&gtk::Box>;
+    fn set_focusable(&self, focusable: bool);
     fn set_skip_taskbar(&self, skip_taskbar: bool);
     fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>);
 }
 
 impl WindowExtGtk for dyn CoreWindow + '_ {
     #[inline]
+    fn gtk_window(&self) -> &gtk::ApplicationWindow {
+        let window = self.cast_ref::<GtkWindow>().unwrap();
+        window.gtk_window()
+    }
+
+    #[inline]
     fn default_vbox(&self) -> Option<&gtk::Box> {
         let window = self.cast_ref::<GtkWindow>().unwrap();
         window.default_vbox()
+    }
+
+    #[inline]
+    fn set_focusable(&self, focusable: bool) {
+        let window = self.cast_ref::<GtkWindow>().unwrap();
+        window.set_focusable(focusable)
     }
 
     #[inline]
@@ -54,16 +68,22 @@ impl WindowExtGtk for dyn CoreWindow + '_ {
 /// Window attributes methods specific to GTK.
 #[derive(Debug, Clone)]
 pub struct WindowAttributesGtk {
+    pub(crate) focusable: bool,
     pub(crate) skip_taskbar: bool,
-    pub(crate) auto_transparent: bool,
-    pub(crate) double_buffered: bool,
+    pub(crate) transparent_draw: bool,
     pub(crate) app_paintable: bool,
     pub(crate) rgba_visual: bool,
-    pub(crate) cursor_moved: bool,
+    pub(crate) pointer_moved: bool,
     pub(crate) default_vbox: bool,
 }
 
 impl WindowAttributesGtk {
+    #[inline]
+    pub fn with_focusable(mut self, focusable: bool) -> Self {
+        self.focusable = focusable;
+        self
+    }
+
     #[inline]
     pub fn with_skip_taskbar(mut self, skip_taskbar: bool) -> Self {
         self.skip_taskbar = skip_taskbar;
@@ -71,14 +91,8 @@ impl WindowAttributesGtk {
     }
 
     #[inline]
-    pub fn with_auto_transparent(mut self, auto_transparent: bool) -> Self {
-        self.auto_transparent = auto_transparent;
-        self
-    }
-
-    #[inline]
-    pub fn with_double_buffered(mut self, double_buffered: bool) -> Self {
-        self.double_buffered = double_buffered;
+    pub fn with_transparent_draw(mut self, transparent_draw: bool) -> Self {
+        self.transparent_draw = transparent_draw;
         self
     }
 
@@ -95,8 +109,8 @@ impl WindowAttributesGtk {
     }
 
     #[inline]
-    pub fn with_cursor_moved(mut self, cursor_moved: bool) -> Self {
-        self.cursor_moved = cursor_moved;
+    pub fn with_pointer_moved(mut self, pointer_moved: bool) -> Self {
+        self.pointer_moved = pointer_moved;
         self
     }
 
@@ -111,12 +125,12 @@ impl Default for WindowAttributesGtk {
     #[inline]
     fn default() -> Self {
         Self {
+            focusable: true,
             skip_taskbar: false,
-            auto_transparent: true,
-            double_buffered: true,
+            transparent_draw: false,
             app_paintable: false,
             rgba_visual: false,
-            cursor_moved: true,
+            pointer_moved: true,
             default_vbox: true,
         }
     }
@@ -158,13 +172,13 @@ impl ActiveEventLoopExtGtk for dyn CoreActiveEventLoop + '_ {
     #[inline]
     fn is_wayland(&self) -> bool {
         let event_loop = self.cast_ref::<GtkActiveEventLoop>().unwrap();
-        event_loop.is_wayland()
+        event_loop.backend().is_wayland()
     }
 
     #[inline]
     fn is_x11(&self) -> bool {
         let event_loop = self.cast_ref::<GtkActiveEventLoop>().unwrap();
-        event_loop.is_x11()
+        event_loop.backend().is_x11()
     }
 
     #[inline]
