@@ -18,17 +18,21 @@ use winit_core::window::{
 };
 
 use crate::WindowAttributesGtk;
-use crate::event_loop::{ActiveEventLoop, OwnedDisplayHandle};
+use crate::event_loop::{ActiveEventLoop, EventLoopWindow, OwnedDisplayHandle};
 use crate::monitor::MonitorHandle;
 
 const GTK_DARK_THEME_SUFFIXES: &[&str] = &["-dark", "-Dark", "-Darker"];
 
-/// The GTK window.
+#[derive(Debug)]
+struct WindowState {
+    scale_factor: AtomicI32,
+}
+
 #[derive(Debug)]
 pub struct Window {
     id: WindowId,
     raw: OwnedWindowHandle,
-    scale_factor: Arc<AtomicI32>,
+    state: Arc<WindowState>,
     context: glib::MainContext,
     handle: Arc<OwnedDisplayHandle>,
     redraw_tx: crossbeam_channel::Sender<WindowId>,
@@ -65,17 +69,7 @@ impl Window {
 
         let window = builder.build();
 
-        let id = WindowId::from_raw(window.id() as _);
-        event_loop.windows.borrow_mut().insert(id);
-
         let scale_factor = window.scale_factor();
-        let scale_factor_shared = Arc::new(AtomicI32::new(window.scale_factor()));
-        {
-            let scale_factor = scale_factor_shared.clone();
-            window.connect_scale_factor_notify(move |w| {
-                scale_factor.store(w.scale_factor(), Ordering::Release);
-            });
-        }
 
         let (width, height) = attributes
             .surface_size
@@ -229,10 +223,13 @@ impl Window {
             window.set_visual(Some(&visual));
         }
 
-        if pl_attributes.default_vbox {
+        let default_vbox = if pl_attributes.default_vbox {
             let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
             window.add(&vbox);
-        }
+            Some(vbox)
+        } else {
+            None
+        };
 
         // TODO: handle attributes.cursor
         // TODO: handle pl_attributes.transparent_draw
@@ -264,6 +261,21 @@ impl Window {
             *signal_id.borrow_mut() = Some(id);
         }
 
+        let state = Arc::new(WindowState { scale_factor: AtomicI32::new(scale_factor) });
+
+        {
+            let state = state.clone();
+            window.connect_scale_factor_notify(move |w| {
+                state.scale_factor.store(w.scale_factor(), Ordering::Release);
+            });
+        }
+
+        let id = WindowId::from_raw(window.id() as _);
+        event_loop
+            .windows
+            .borrow_mut()
+            .insert(id, EventLoopWindow::new(window.clone(), default_vbox));
+
         window.realize(); // Ensure window.window() is created
         let raw = window.window().map_or(OwnedWindowHandle::Unavailable, |window| {
             OwnedWindowHandle::new(&window, event_loop.backend())
@@ -272,20 +284,12 @@ impl Window {
         Ok(Self {
             id,
             raw,
-            scale_factor: scale_factor_shared,
+            state,
             context: event_loop.context.clone(),
             handle: event_loop.handle.clone(),
             redraw_tx: event_loop.redraw_tx.clone(),
             window_requests_tx: event_loop.window_requests_tx.clone(),
         })
-    }
-
-    pub(crate) fn gtk_window(&self) -> &gtk::ApplicationWindow {
-        todo!()
-    }
-
-    pub(crate) fn default_vbox(&self) -> Option<&gtk::Box> {
-        todo!()
     }
 
     pub(crate) fn set_focusable(&self, focusable: bool) {
@@ -302,6 +306,26 @@ impl Window {
         let _ = count;
         let _ = desktop_filename;
         todo!()
+    }
+
+    pub(crate) fn with_gtk_window<F>(&self, f: F)
+    where
+        F: FnOnce(&gtk::ApplicationWindow) + Send + 'static,
+    {
+        let _ = self
+            .window_requests_tx
+            .send_blocking((self.id, WindowRequest::WithGtkWindow(Box::new(f))));
+        self.context.wakeup();
+    }
+
+    pub(crate) fn with_default_vbox<F>(&self, f: F)
+    where
+        F: FnOnce(Option<&gtk::Box>) + Send + 'static,
+    {
+        let _ = self
+            .window_requests_tx
+            .send_blocking((self.id, WindowRequest::WithDefaultVbox(Box::new(f))));
+        self.context.wakeup();
     }
 }
 
@@ -329,7 +353,7 @@ impl CoreWindow for Window {
     }
 
     fn scale_factor(&self) -> f64 {
-        self.scale_factor.load(Ordering::Acquire) as _
+        self.state.scale_factor.load(Ordering::Acquire) as _
     }
 
     fn request_redraw(&self) {
@@ -584,8 +608,23 @@ impl CoreWindow for Window {
 
 /// The request from the window to the event loop.
 #[non_exhaustive]
-#[derive(Debug)]
-pub enum WindowRequest {}
+pub enum WindowRequest {
+    WithGtkWindow(Box<dyn FnOnce(&gtk::ApplicationWindow) + Send + 'static>),
+    WithDefaultVbox(Box<dyn FnOnce(Option<&gtk::Box>) + Send + 'static>),
+}
+
+impl std::fmt::Debug for WindowRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WithGtkWindow(_) => {
+                f.debug_tuple("WithGtkWindow").field(&format_args!("<...>")).finish()
+            },
+            Self::WithDefaultVbox(_) => {
+                f.debug_tuple("WithDefaultVbox").field(&format_args!("<...>")).finish()
+            },
+        }
+    }
+}
 
 #[derive(Debug)]
 enum OwnedWindowHandle {

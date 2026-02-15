@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -75,12 +75,24 @@ impl Default for PlatformSpecificEventLoopAttributes {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct EventLoopWindow {
+    window: gtk::ApplicationWindow,
+    default_vbox: Option<gtk::Box>,
+}
+
+impl EventLoopWindow {
+    pub(crate) fn new(window: gtk::ApplicationWindow, default_vbox: Option<gtk::Box>) -> Self {
+        Self { window, default_vbox }
+    }
+}
+
 #[derive(Debug)]
 pub struct ActiveEventLoop {
     pub(crate) context: glib::MainContext,
     pub(crate) display: gdk::Display,
     pub(crate) app: gtk::Application,
-    pub(crate) windows: Rc<RefCell<HashSet<WindowId>>>,
+    pub(crate) windows: Rc<RefCell<HashMap<WindowId, EventLoopWindow>>>,
     pub(crate) window_requests_tx: async_channel::Sender<(WindowId, WindowRequest)>,
     pub(crate) events_tx: crossbeam_channel::Sender<QueuedEvent>,
     pub(crate) redraw_tx: crossbeam_channel::Sender<WindowId>,
@@ -249,10 +261,15 @@ impl EventLoop {
             proxy_wake_flag,
         };
 
+        let windows = window_target.windows.clone();
         context.spawn_local(async move {
             while let Ok((id, request)) = window_requests_rx.recv().await {
-                let _ = id;
-                match request {}
+                if let Some(window) = windows.borrow().get(&id).cloned() {
+                    match request {
+                        WindowRequest::WithGtkWindow(f) => f(&window.window),
+                        WindowRequest::WithDefaultVbox(f) => f(window.default_vbox.as_ref()),
+                    }
+                }
             }
         });
 

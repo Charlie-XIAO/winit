@@ -26,26 +26,20 @@ use self::window::Window as GtkWindow;
 ///
 /// [`Window`]: crate::window::Window
 pub trait WindowExtGtk {
-    fn gtk_window(&self) -> &gtk::ApplicationWindow;
-    fn default_vbox(&self) -> Option<&gtk::Box>;
     fn set_focusable(&self, focusable: bool);
     fn set_skip_taskbar(&self, skip_taskbar: bool);
     fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>);
+
+    fn with_gtk_window<F>(&self, f: F)
+    where
+        F: FnOnce(&gtk::ApplicationWindow) + Send + 'static;
+
+    fn with_default_vbox<F>(&self, f: F)
+    where
+        F: FnOnce(Option<&gtk::Box>) + Send + 'static;
 }
 
 impl WindowExtGtk for dyn CoreWindow + '_ {
-    #[inline]
-    fn gtk_window(&self) -> &gtk::ApplicationWindow {
-        let window = self.cast_ref::<GtkWindow>().unwrap();
-        window.gtk_window()
-    }
-
-    #[inline]
-    fn default_vbox(&self) -> Option<&gtk::Box> {
-        let window = self.cast_ref::<GtkWindow>().unwrap();
-        window.default_vbox()
-    }
-
     #[inline]
     fn set_focusable(&self, focusable: bool) {
         let window = self.cast_ref::<GtkWindow>().unwrap();
@@ -62,6 +56,24 @@ impl WindowExtGtk for dyn CoreWindow + '_ {
     fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
         let window = self.cast_ref::<GtkWindow>().unwrap();
         window.set_badge_count(count, desktop_filename)
+    }
+
+    #[inline]
+    fn with_gtk_window<F>(&self, f: F)
+    where
+        F: FnOnce(&gtk::ApplicationWindow) + Send + 'static,
+    {
+        let window = self.cast_ref::<GtkWindow>().unwrap();
+        window.with_gtk_window(f)
+    }
+
+    #[inline]
+    fn with_default_vbox<F>(&self, f: F)
+    where
+        F: FnOnce(Option<&gtk::Box>) + Send + 'static,
+    {
+        let window = self.cast_ref::<GtkWindow>().unwrap();
+        window.with_default_vbox(f)
     }
 }
 
