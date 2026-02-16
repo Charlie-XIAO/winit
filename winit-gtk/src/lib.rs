@@ -16,6 +16,7 @@ macro_rules! os_error {
 mod event_loop;
 mod monitor;
 mod window;
+mod window_request;
 
 use self::event_loop::ActiveEventLoop as GtkActiveEventLoop;
 pub use self::event_loop::{EventLoop, PlatformSpecificEventLoopAttributes};

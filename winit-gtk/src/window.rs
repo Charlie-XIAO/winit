@@ -20,6 +20,7 @@ use winit_core::window::{
 use crate::WindowAttributesGtk;
 use crate::event_loop::{ActiveEventLoop, EventLoopWindow, OwnedDisplayHandle};
 use crate::monitor::MonitorHandle;
+use crate::window_request::WindowRequest;
 
 const GTK_DARK_THEME_SUFFIXES: &[&str] = &["-dark", "-Dark", "-Darker"];
 
@@ -185,7 +186,7 @@ impl Window {
             }
         }
 
-        if let Some(fullscreen) = attributes.fullscreen {
+        if let Some(ref fullscreen) = attributes.fullscreen {
             match fullscreen {
                 Fullscreen::Borderless(Some(m)) => {
                     let display = window.display();
@@ -232,8 +233,6 @@ impl Window {
         };
 
         // TODO: handle attributes.cursor
-        // TODO: handle pl_attributes.transparent_draw
-        // TODO: handle pl_attributes.pointer_moved (whether to turn off pointer moved events)
 
         if attributes.visible {
             window.show_all();
@@ -274,7 +273,19 @@ impl Window {
         event_loop
             .windows
             .borrow_mut()
-            .insert(id, EventLoopWindow::new(window.clone(), default_vbox));
+            .insert(id, EventLoopWindow { window: window.clone(), default_vbox });
+
+        if let Err(e) = event_loop.window_requests_tx.send_blocking((
+            id,
+            WindowRequest::WireUpEvents {
+                transparent_draw: attributes.transparent && pl_attributes.transparent_draw,
+                pointer_moved: pl_attributes.pointer_moved,
+                fullscreen: attributes.fullscreen.is_some(),
+            },
+        )) {
+            tracing::warn!("Failed to send WindowRequest::WireUpEvents: {e}");
+        }
+        event_loop.context.wakeup();
 
         window.realize(); // Ensure window.window() is created
         let raw = window.window().map_or(OwnedWindowHandle::Unavailable, |window| {
@@ -312,9 +323,12 @@ impl Window {
     where
         F: FnOnce(&gtk::ApplicationWindow) + Send + 'static,
     {
-        let _ = self
+        if let Err(e) = self
             .window_requests_tx
-            .send_blocking((self.id, WindowRequest::WithGtkWindow(Box::new(f))));
+            .send_blocking((self.id, WindowRequest::WithGtkWindow(Box::new(f))))
+        {
+            tracing::warn!("Failed to send WindowRequest::WithGtkWindow: {e}");
+        }
         self.context.wakeup();
     }
 
@@ -322,9 +336,12 @@ impl Window {
     where
         F: FnOnce(Option<&gtk::Box>) + Send + 'static,
     {
-        let _ = self
+        if let Err(e) = self
             .window_requests_tx
-            .send_blocking((self.id, WindowRequest::WithDefaultVbox(Box::new(f))));
+            .send_blocking((self.id, WindowRequest::WithDefaultVbox(Box::new(f))))
+        {
+            tracing::warn!("Failed to send WindowRequest::WithDefaultVbox: {e}");
+        }
         self.context.wakeup();
     }
 }
@@ -603,26 +620,6 @@ impl CoreWindow for Window {
 
     fn rwh_06_window_handle(&self) -> &dyn rwh_06::HasWindowHandle {
         self
-    }
-}
-
-/// The request from the window to the event loop.
-#[non_exhaustive]
-pub enum WindowRequest {
-    WithGtkWindow(Box<dyn FnOnce(&gtk::ApplicationWindow) + Send + 'static>),
-    WithDefaultVbox(Box<dyn FnOnce(Option<&gtk::Box>) + Send + 'static>),
-}
-
-impl std::fmt::Debug for WindowRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::WithGtkWindow(_) => {
-                f.debug_tuple("WithGtkWindow").field(&format_args!("<...>")).finish()
-            },
-            Self::WithDefaultVbox(_) => {
-                f.debug_tuple("WithDefaultVbox").field(&format_args!("<...>")).finish()
-            },
-        }
     }
 }
 

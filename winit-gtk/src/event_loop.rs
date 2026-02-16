@@ -23,7 +23,8 @@ use winit_core::monitor::MonitorHandle as CoreMonitorHandle;
 use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId};
 
 use crate::monitor::MonitorHandle;
-use crate::window::{Window, WindowRequest};
+use crate::window::Window;
+use crate::window_request::{WindowRequest, handle_window_requests};
 
 #[derive(Debug)]
 struct PeekableReceiver<T> {
@@ -77,22 +78,18 @@ impl Default for PlatformSpecificEventLoopAttributes {
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventLoopWindow {
-    window: gtk::ApplicationWindow,
-    default_vbox: Option<gtk::Box>,
+    pub(crate) window: gtk::ApplicationWindow,
+    pub(crate) default_vbox: Option<gtk::Box>,
 }
 
-impl EventLoopWindow {
-    pub(crate) fn new(window: gtk::ApplicationWindow, default_vbox: Option<gtk::Box>) -> Self {
-        Self { window, default_vbox }
-    }
-}
+pub(crate) type EventLoopWindows = Rc<RefCell<HashMap<WindowId, EventLoopWindow>>>;
 
 #[derive(Debug)]
 pub struct ActiveEventLoop {
     pub(crate) context: glib::MainContext,
     pub(crate) display: gdk::Display,
     pub(crate) app: gtk::Application,
-    pub(crate) windows: Rc<RefCell<HashMap<WindowId, EventLoopWindow>>>,
+    pub(crate) windows: EventLoopWindows,
     pub(crate) window_requests_tx: async_channel::Sender<(WindowId, WindowRequest)>,
     pub(crate) events_tx: crossbeam_channel::Sender<QueuedEvent>,
     pub(crate) redraw_tx: crossbeam_channel::Sender<WindowId>,
@@ -252,8 +249,8 @@ impl EventLoop {
             app: app.clone(),
             windows: Default::default(),
             window_requests_tx,
-            events_tx,
-            redraw_tx,
+            events_tx: events_tx.clone(),
+            redraw_tx: redraw_tx.clone(),
             handle: Arc::new(handle),
             control_flow: Default::default(),
             exit_code: Default::default(),
@@ -261,17 +258,12 @@ impl EventLoop {
             proxy_wake_flag,
         };
 
-        let windows = window_target.windows.clone();
-        context.spawn_local(async move {
-            while let Ok((id, request)) = window_requests_rx.recv().await {
-                if let Some(window) = windows.borrow().get(&id).cloned() {
-                    match request {
-                        WindowRequest::WithGtkWindow(f) => f(&window.window),
-                        WindowRequest::WithDefaultVbox(f) => f(window.default_vbox.as_ref()),
-                    }
-                }
-            }
-        });
+        context.spawn_local(handle_window_requests(
+            window_target.windows.clone(),
+            window_requests_rx,
+            events_tx,
+            redraw_tx,
+        ));
 
         Ok(Self {
             loop_running: false,
