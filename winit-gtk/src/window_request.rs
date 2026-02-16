@@ -9,6 +9,7 @@ pub enum WindowRequest {
     Title(String),
     Visible(bool),
     Resizable(bool),
+    Destroy,
     WithGtkWindow(Box<dyn FnOnce(&gtk::ApplicationWindow) + Send + 'static>),
     WithDefaultVbox(Box<dyn FnOnce(Option<&gtk::Box>) + Send + 'static>),
     WireUpEvents { transparent_draw: bool, pointer_moved: bool, fullscreen: bool },
@@ -21,6 +22,15 @@ pub async fn handle_window_requests(
     redraw_tx: crossbeam_channel::Sender<WindowId>,
 ) {
     while let Ok((id, request)) = window_requests_rx.recv().await {
+        if matches!(request, WindowRequest::Destroy) {
+            if let Some(window) = windows.borrow_mut().remove(&id) {
+                unsafe {
+                    window.window.destroy();
+                }
+            }
+            continue;
+        }
+
         if let Some(window) = windows.borrow().get(&id).cloned() {
             let EventLoopWindow { window, default_vbox } = window;
 
@@ -55,6 +65,7 @@ pub async fn handle_window_requests(
                         fullscreen,
                     );
                 },
+                _ => unreachable!(),
             }
         }
     }

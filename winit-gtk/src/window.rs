@@ -348,7 +348,10 @@ impl Window {
 
 impl Drop for Window {
     fn drop(&mut self) {
-        todo!()
+        if let Err(e) = self.window_requests_tx.send_blocking((self.id, WindowRequest::Destroy)) {
+            tracing::warn!("Failed to send WindowRequest::Destroy: {e}");
+        }
+        self.context.wakeup();
     }
 }
 
@@ -378,9 +381,7 @@ impl CoreWindow for Window {
         self.context.wakeup();
     }
 
-    fn pre_present_notify(&self) {
-        todo!()
-    }
+    fn pre_present_notify(&self) {}
 
     fn reset_dead_keys(&self) {
         todo!()
