@@ -155,9 +155,9 @@ fn handle_wire_up_events(
             }
 
             state.set_surface_position(surface_x, surface_y);
-            state.set_surface_size(surface_width, surface_height);
+            state.set_surface_size(surface_width as _, surface_height as _);
             state.set_outer_position(outer_x, outer_y);
-            state.set_outer_size(outer_width, outer_height);
+            state.set_outer_size(outer_width as _, outer_height as _);
 
             let scale_factor = window.scale_factor() as f64;
 

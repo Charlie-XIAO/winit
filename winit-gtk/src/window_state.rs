@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use gtk::prelude::*;
@@ -10,10 +10,10 @@ pub struct WindowState {
     surface_y: AtomicI32,
     outer_x: AtomicI32,
     outer_y: AtomicI32,
-    surface_width: AtomicU32,
-    surface_height: AtomicU32,
-    outer_width: AtomicU32,
-    outer_height: AtomicU32,
+    surface_width: AtomicI32,
+    surface_height: AtomicI32,
+    outer_width: AtomicI32,
+    outer_height: AtomicI32,
 }
 
 impl WindowState {
@@ -47,10 +47,10 @@ impl WindowState {
             surface_y: AtomicI32::new(surface_y),
             outer_x: AtomicI32::new(outer_x),
             outer_y: AtomicI32::new(outer_y),
-            surface_width: AtomicU32::new(surface_width as _),
-            surface_height: AtomicU32::new(surface_height as _),
-            outer_width: AtomicU32::new(outer_width as _),
-            outer_height: AtomicU32::new(outer_height as _),
+            surface_width: AtomicI32::new(surface_width),
+            surface_height: AtomicI32::new(surface_height),
+            outer_width: AtomicI32::new(outer_width),
+            outer_height: AtomicI32::new(outer_height),
         }
     }
 
@@ -96,7 +96,7 @@ impl WindowState {
         .to_physical(self.scale_factor())
     }
 
-    pub fn set_surface_size(&self, width: u32, height: u32) {
+    pub fn set_surface_size(&self, width: i32, height: i32) {
         self.surface_width.store(width, Ordering::Release);
         self.surface_height.store(height, Ordering::Release);
     }
@@ -109,7 +109,7 @@ impl WindowState {
         .to_physical(self.scale_factor())
     }
 
-    pub fn set_outer_size(&self, width: u32, height: u32) {
+    pub fn set_outer_size(&self, width: i32, height: i32) {
         self.outer_width.store(width, Ordering::Release);
         self.outer_height.store(height, Ordering::Release);
     }
