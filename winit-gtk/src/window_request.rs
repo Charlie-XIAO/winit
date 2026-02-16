@@ -2,13 +2,16 @@ use dpi::{LogicalPosition, LogicalSize};
 use gtk::{cairo, gdk, glib, prelude::*};
 use winit_core::{event::WindowEvent, window::WindowId};
 
-use crate::event_loop::{EventLoopWindows, QueuedEvent};
+use crate::event_loop::{EventLoopWindow, EventLoopWindows, QueuedEvent};
 
 #[non_exhaustive]
 pub enum WindowRequest {
-    WireUpEvents { transparent_draw: bool, pointer_moved: bool, fullscreen: bool },
+    Title(String),
+    Visible(bool),
+    Resizable(bool),
     WithGtkWindow(Box<dyn FnOnce(&gtk::ApplicationWindow) + Send + 'static>),
     WithDefaultVbox(Box<dyn FnOnce(Option<&gtk::Box>) + Send + 'static>),
+    WireUpEvents { transparent_draw: bool, pointer_moved: bool, fullscreen: bool },
 }
 
 pub async fn handle_window_requests(
@@ -19,11 +22,32 @@ pub async fn handle_window_requests(
 ) {
     while let Ok((id, request)) = window_requests_rx.recv().await {
         if let Some(window) = windows.borrow().get(&id).cloned() {
+            let EventLoopWindow { window, default_vbox } = window;
+
             match request {
+                WindowRequest::Title(title) => {
+                    window.set_title(&title);
+                },
+                WindowRequest::Visible(visible) => {
+                    if visible {
+                        window.show_all();
+                    } else {
+                        window.hide();
+                    }
+                },
+                WindowRequest::Resizable(resizable) => {
+                    window.set_resizable(resizable);
+                },
+                WindowRequest::WithGtkWindow(f) => {
+                    f(&window);
+                },
+                WindowRequest::WithDefaultVbox(f) => {
+                    f(default_vbox.as_ref());
+                },
                 WindowRequest::WireUpEvents { transparent_draw, pointer_moved, fullscreen } => {
                     handle_wire_up_events(
                         id,
-                        &window.window.clone(),
+                        &window,
                         events_tx.clone(),
                         redraw_tx.clone(),
                         transparent_draw,
@@ -31,8 +55,6 @@ pub async fn handle_window_requests(
                         fullscreen,
                     );
                 },
-                WindowRequest::WithGtkWindow(f) => f(&window.window),
-                WindowRequest::WithDefaultVbox(f) => f(window.default_vbox.as_ref()),
             }
         }
     }

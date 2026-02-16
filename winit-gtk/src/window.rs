@@ -436,8 +436,13 @@ impl CoreWindow for Window {
     }
 
     fn set_title(&self, title: &str) {
-        let _ = title;
-        todo!()
+        if let Err(e) = self
+            .window_requests_tx
+            .send_blocking((self.id, WindowRequest::Title(title.to_string())))
+        {
+            tracing::warn!("Failed to send WindowRequest::Title: {e}");
+        }
+        self.context.wakeup();
     }
 
     fn set_transparent(&self, transparent: bool) {
@@ -451,8 +456,12 @@ impl CoreWindow for Window {
     }
 
     fn set_visible(&self, visible: bool) {
-        let _ = visible;
-        todo!()
+        if let Err(e) =
+            self.window_requests_tx.send_blocking((self.id, WindowRequest::Visible(visible)))
+        {
+            tracing::warn!("Failed to send WindowRequest::Visible: {e}");
+        }
+        self.context.wakeup();
     }
 
     fn is_visible(&self) -> Option<bool> {
@@ -460,8 +469,12 @@ impl CoreWindow for Window {
     }
 
     fn set_resizable(&self, resizable: bool) {
-        let _ = resizable;
-        todo!()
+        if let Err(e) =
+            self.window_requests_tx.send_blocking((self.id, WindowRequest::Resizable(resizable)))
+        {
+            tracing::warn!("Failed to send WindowRequest::Resizable: {e}");
+        }
+        self.context.wakeup();
     }
 
     fn is_resizable(&self) -> bool {
