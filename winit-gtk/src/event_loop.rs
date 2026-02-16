@@ -25,6 +25,7 @@ use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId
 use crate::monitor::MonitorHandle;
 use crate::window::Window;
 use crate::window_request::{WindowRequest, handle_window_requests};
+use crate::window_state::WindowState;
 
 #[derive(Debug)]
 struct PeekableReceiver<T> {
@@ -80,6 +81,7 @@ impl Default for PlatformSpecificEventLoopAttributes {
 pub(crate) struct EventLoopWindow {
     pub(crate) window: gtk::ApplicationWindow,
     pub(crate) default_vbox: Option<gtk::Box>,
+    pub(crate) state: Arc<WindowState>,
 }
 
 pub(crate) type EventLoopWindows = Rc<RefCell<HashMap<WindowId, EventLoopWindow>>>;

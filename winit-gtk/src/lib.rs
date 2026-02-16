@@ -17,6 +17,7 @@ mod event_loop;
 mod monitor;
 mod window;
 mod window_request;
+mod window_state;
 
 use self::event_loop::ActiveEventLoop as GtkActiveEventLoop;
 pub use self::event_loop::{EventLoop, PlatformSpecificEventLoopAttributes};

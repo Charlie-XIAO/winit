@@ -1,8 +1,13 @@
+use std::sync::Arc;
+
 use dpi::{LogicalPosition, LogicalSize};
 use gtk::{cairo, gdk, glib, prelude::*};
 use winit_core::{event::WindowEvent, window::WindowId};
 
-use crate::event_loop::{EventLoopWindow, EventLoopWindows, QueuedEvent};
+use crate::{
+    event_loop::{EventLoopWindow, EventLoopWindows, QueuedEvent},
+    window_state::WindowState,
+};
 
 #[non_exhaustive]
 pub enum WindowRequest {
@@ -32,7 +37,7 @@ pub async fn handle_window_requests(
         }
 
         if let Some(window) = windows.borrow().get(&id).cloned() {
-            let EventLoopWindow { window, default_vbox } = window;
+            let EventLoopWindow { window, default_vbox, state } = window;
 
             match request {
                 WindowRequest::Title(title) => {
@@ -58,6 +63,7 @@ pub async fn handle_window_requests(
                     handle_wire_up_events(
                         id,
                         &window,
+                        state,
                         events_tx.clone(),
                         redraw_tx.clone(),
                         transparent_draw,
@@ -74,6 +80,7 @@ pub async fn handle_window_requests(
 fn handle_wire_up_events(
     id: WindowId,
     window: &gtk::ApplicationWindow,
+    state: Arc<WindowState>,
     events_tx: crossbeam_channel::Sender<QueuedEvent>,
     redraw_tx: crossbeam_channel::Sender<WindowId>,
     transparent_draw: bool,
@@ -92,6 +99,14 @@ fn handle_wire_up_events(
             | gdk::EventMask::FOCUS_CHANGE_MASK
             | gdk::EventMask::SCROLL_MASK,
     );
+
+    // Handle when the scale factor of the window changes
+    {
+        let state = state.clone();
+        window.connect_scale_factor_notify(move |w| {
+            state.set_scale_factor(w.scale_factor());
+        });
+    }
 
     // TODO: TAO src/platform_impl/linux/event_loop.rs:L472-L483
 
@@ -116,18 +131,42 @@ fn handle_wire_up_events(
     // Handle when the size or position of the window changes
     {
         let tx = events_tx.clone();
+        let state = state.clone();
         window.connect_configure_event(move |window, event| {
+            let mut surface_x = 0;
+            let mut surface_y = 0;
+            let mut outer_x = 0;
+            let mut outer_y = 0;
+
+            let (surface_width, surface_height) = event.size();
+            let mut outer_width = surface_width;
+            let mut outer_height = surface_height;
+
+            if let Some(window) = window.window() {
+                let frame = window.frame_extents();
+                outer_x = frame.x();
+                outer_y = frame.y();
+                outer_width = frame.width() as _;
+                outer_height = frame.height() as _;
+
+                let (_, sx, sy) = window.origin();
+                surface_x = sx - outer_x;
+                surface_y = sy - outer_y;
+            }
+
+            state.set_surface_position(surface_x, surface_y);
+            state.set_surface_size(surface_width, surface_height);
+            state.set_outer_position(outer_x, outer_y);
+            state.set_outer_size(outer_width, outer_height);
+
             let scale_factor = window.scale_factor() as f64;
 
-            let (x, y) =
-                window.window().map(|w| w.root_origin()).unwrap_or_else(|| event.position());
-            let pos = LogicalPosition::new(x, y).to_physical(scale_factor);
+            let pos = LogicalPosition::new(outer_x, outer_y).to_physical(scale_factor);
             if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::Moved(pos) }) {
                 tracing::warn!("Failed to send WindowEvent::Moved: {e}");
             }
 
-            let (w, h) = event.size();
-            let size = LogicalSize::new(w, h).to_physical(scale_factor);
+            let size = LogicalSize::new(surface_width, surface_height).to_physical(scale_factor);
             if let Err(e) =
                 tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
             {

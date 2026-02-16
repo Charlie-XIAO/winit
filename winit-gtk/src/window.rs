@@ -3,7 +3,6 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
 
 use dpi::{PhysicalInsets, PhysicalPosition, PhysicalSize, Position, Size};
 use gtk::{gdk, gdk_pixbuf, glib, prelude::*};
@@ -21,13 +20,9 @@ use crate::WindowAttributesGtk;
 use crate::event_loop::{ActiveEventLoop, EventLoopWindow, OwnedDisplayHandle};
 use crate::monitor::MonitorHandle;
 use crate::window_request::WindowRequest;
+use crate::window_state::WindowState;
 
 const GTK_DARK_THEME_SUFFIXES: &[&str] = &["-dark", "-Dark", "-Darker"];
-
-#[derive(Debug)]
-struct WindowState {
-    scale_factor: AtomicI32,
-}
 
 #[derive(Debug)]
 pub struct Window {
@@ -260,20 +255,14 @@ impl Window {
             *signal_id.borrow_mut() = Some(id);
         }
 
-        let state = Arc::new(WindowState { scale_factor: AtomicI32::new(scale_factor) });
-
-        {
-            let state = state.clone();
-            window.connect_scale_factor_notify(move |w| {
-                state.scale_factor.store(w.scale_factor(), Ordering::Release);
-            });
-        }
+        window.realize(); // Ensure window.window() is created
 
         let id = WindowId::from_raw(window.id() as _);
-        event_loop
-            .windows
-            .borrow_mut()
-            .insert(id, EventLoopWindow { window: window.clone(), default_vbox });
+        let state = Arc::new(WindowState::new(&window));
+        event_loop.windows.borrow_mut().insert(
+            id,
+            EventLoopWindow { window: window.clone(), default_vbox, state: state.clone() },
+        );
 
         if let Err(e) = event_loop.window_requests_tx.send_blocking((
             id,
@@ -287,7 +276,6 @@ impl Window {
         }
         event_loop.context.wakeup();
 
-        window.realize(); // Ensure window.window() is created
         let raw = window.window().map_or(OwnedWindowHandle::Unavailable, |window| {
             OwnedWindowHandle::new(&window, event_loop.backend())
         });
@@ -373,7 +361,7 @@ impl CoreWindow for Window {
     }
 
     fn scale_factor(&self) -> f64 {
-        self.state.scale_factor.load(Ordering::Acquire) as _
+        self.state.scale_factor()
     }
 
     fn request_redraw(&self) {
@@ -388,11 +376,11 @@ impl CoreWindow for Window {
     }
 
     fn surface_position(&self) -> PhysicalPosition<i32> {
-        todo!()
+        self.state.surface_position()
     }
 
     fn outer_position(&self) -> Result<PhysicalPosition<i32>, RequestError> {
-        todo!()
+        Ok(self.state.outer_position())
     }
 
     fn set_outer_position(&self, position: Position) {
@@ -401,7 +389,7 @@ impl CoreWindow for Window {
     }
 
     fn surface_size(&self) -> PhysicalSize<u32> {
-        todo!()
+        self.state.surface_size()
     }
 
     fn request_surface_size(&self, size: Size) -> Option<PhysicalSize<u32>> {
@@ -410,7 +398,7 @@ impl CoreWindow for Window {
     }
 
     fn outer_size(&self) -> PhysicalSize<u32> {
-        todo!()
+        self.state.outer_size()
     }
 
     fn safe_area(&self) -> PhysicalInsets<u32> {
