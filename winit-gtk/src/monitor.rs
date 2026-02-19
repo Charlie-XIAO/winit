@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use dpi::{LogicalPosition, PhysicalPosition};
-use gtk::{gdk, prelude::*};
+use gtk::gdk;
+use gtk::prelude::*;
 use winit_core::monitor::{MonitorHandleProvider, VideoMode};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

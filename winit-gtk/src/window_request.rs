@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
 use dpi::{LogicalPosition, LogicalSize};
-use gtk::{cairo, gdk, glib, prelude::*};
-use winit_core::{event::WindowEvent, window::WindowId};
+use gtk::prelude::*;
+use gtk::{cairo, gdk, glib};
+use winit_core::event::WindowEvent;
+use winit_core::window::WindowId;
 
-use crate::{
-    event_loop::{EventLoopWindow, EventLoopWindows, QueuedEvent},
-    window_state::WindowState,
-};
+use crate::event_loop::{EventLoopWindow, EventLoopWindows, QueuedEvent};
+use crate::window_state::SharedWindowState;
 
 #[non_exhaustive]
 pub enum WindowRequest {
@@ -80,7 +78,7 @@ pub async fn handle_window_requests(
 fn handle_wire_up_events(
     id: WindowId,
     window: &gtk::ApplicationWindow,
-    state: Arc<WindowState>,
+    state: SharedWindowState,
     events_tx: crossbeam_channel::Sender<QueuedEvent>,
     redraw_tx: crossbeam_channel::Sender<WindowId>,
     transparent_draw: bool,
@@ -104,7 +102,7 @@ fn handle_wire_up_events(
     {
         let state = state.clone();
         window.connect_scale_factor_notify(move |w| {
-            state.set_scale_factor(w.scale_factor());
+            state.update_scale_factor(w.scale_factor() as _);
         });
     }
 
@@ -133,12 +131,13 @@ fn handle_wire_up_events(
         let tx = events_tx.clone();
         let state = state.clone();
         window.connect_configure_event(move |window, event| {
+            let (inner_x, inner_y) = event.position();
+            let (surface_width, surface_height) = event.size();
+
             let mut surface_x = 0;
             let mut surface_y = 0;
-            let mut outer_x = 0;
-            let mut outer_y = 0;
-
-            let (surface_width, surface_height) = event.size();
+            let mut outer_x = inner_x;
+            let mut outer_y = inner_y;
             let mut outer_width = surface_width;
             let mut outer_height = surface_height;
 
@@ -148,29 +147,39 @@ fn handle_wire_up_events(
                 outer_y = frame.y();
                 outer_width = frame.width() as _;
                 outer_height = frame.height() as _;
-
-                let (_, sx, sy) = window.origin();
-                surface_x = sx - outer_x;
-                surface_y = sy - outer_y;
+                surface_x = inner_x - outer_x;
+                surface_y = inner_y - outer_y;
             }
 
-            state.set_surface_position(surface_x, surface_y);
-            state.set_surface_size(surface_width as _, surface_height as _);
-            state.set_outer_position(outer_x, outer_y);
-            state.set_outer_size(outer_width as _, outer_height as _);
+            let (surface_size_changed, outer_position_changed) = state.update_position_and_size(
+                surface_x,
+                surface_y,
+                surface_width as _,
+                surface_height as _,
+                outer_x,
+                outer_y,
+                outer_width as _,
+                outer_height as _,
+            );
 
             let scale_factor = window.scale_factor() as f64;
 
-            let pos = LogicalPosition::new(outer_x, outer_y).to_physical(scale_factor);
-            if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::Moved(pos) }) {
-                tracing::warn!("Failed to send WindowEvent::Moved: {e}");
+            if surface_size_changed {
+                let size =
+                    LogicalSize::new(surface_width, surface_height).to_physical(scale_factor);
+                if let Err(e) =
+                    tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
+                {
+                    tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
+                }
             }
 
-            let size = LogicalSize::new(surface_width, surface_height).to_physical(scale_factor);
-            if let Err(e) =
-                tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
-            {
-                tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
+            if outer_position_changed {
+                let pos = LogicalPosition::new(outer_x, outer_y).to_physical(scale_factor);
+                if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::Moved(pos) })
+                {
+                    tracing::warn!("Failed to send WindowEvent::Moved: {e}");
+                }
             }
 
             false // Propagate the event further

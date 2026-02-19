@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use gtk::{gdk, gio, glib, prelude::*};
+use gtk::prelude::*;
+use gtk::{gdk, gio, glib};
 use winit_common::free_unix::is_main_thread;
 use winit_core::application::ApplicationHandler;
 use winit_core::cursor::{CustomCursor as CoreCustomCursor, CustomCursorSource};
@@ -25,7 +26,7 @@ use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId
 use crate::monitor::MonitorHandle;
 use crate::window::Window;
 use crate::window_request::{WindowRequest, handle_window_requests};
-use crate::window_state::WindowState;
+use crate::window_state::SharedWindowState;
 
 #[derive(Debug)]
 struct PeekableReceiver<T> {
@@ -81,7 +82,7 @@ impl Default for PlatformSpecificEventLoopAttributes {
 pub(crate) struct EventLoopWindow {
     pub(crate) window: gtk::ApplicationWindow,
     pub(crate) default_vbox: Option<gtk::Box>,
-    pub(crate) state: Arc<WindowState>,
+    pub(crate) state: SharedWindowState,
 }
 
 pub(crate) type EventLoopWindows = Rc<RefCell<HashMap<WindowId, EventLoopWindow>>>;
@@ -218,8 +219,9 @@ impl EventLoop {
         if !attributes.any_thread && !is_main_thread() {
             panic!(
                 "Initializing the event loop outside of the main thread is a significant \
-                cross-platform compatibility hazard. Use `EventLoopBuilderExtGtk::with_any_thread(true)` \
-                if you truly need to create an event loop on a different thread."
+                 cross-platform compatibility hazard. Use \
+                 `EventLoopBuilderExtGtk::with_any_thread(true)` if you truly need to create an \
+                 event loop on a different thread."
             );
         }
 

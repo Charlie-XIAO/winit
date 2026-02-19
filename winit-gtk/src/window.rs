@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use dpi::{PhysicalInsets, PhysicalPosition, PhysicalSize, Position, Size};
-use gtk::{gdk, gdk_pixbuf, glib, prelude::*};
+use gtk::prelude::*;
+use gtk::{gdk, gdk_pixbuf, glib};
 use winit_core::cursor::Cursor;
 use winit_core::error::{NotSupportedError, RequestError};
 use winit_core::icon::{Icon, RgbaIcon};
@@ -20,7 +21,7 @@ use crate::WindowAttributesGtk;
 use crate::event_loop::{ActiveEventLoop, EventLoopWindow, OwnedDisplayHandle};
 use crate::monitor::MonitorHandle;
 use crate::window_request::WindowRequest;
-use crate::window_state::WindowState;
+use crate::window_state::SharedWindowState;
 
 const GTK_DARK_THEME_SUFFIXES: &[&str] = &["-dark", "-Dark", "-Darker"];
 
@@ -28,7 +29,7 @@ const GTK_DARK_THEME_SUFFIXES: &[&str] = &["-dark", "-Dark", "-Darker"];
 pub struct Window {
     id: WindowId,
     raw: OwnedWindowHandle,
-    state: Arc<WindowState>,
+    state: SharedWindowState,
     context: glib::MainContext,
     handle: Arc<OwnedDisplayHandle>,
     redraw_tx: crossbeam_channel::Sender<WindowId>,
@@ -69,27 +70,23 @@ impl Window {
 
         let (width, height) = attributes
             .surface_size
-            .map(|size| size.to_logical::<i32>(scale_factor as _).into())
-            .unwrap_or((800, 600));
-        window.set_default_size(1, 1);
+            .map_or((800, 600), |size| size.to_logical::<i32>(scale_factor as _).into());
+        window.set_default_size(width, height);
         window.resize(width, height);
 
         let mut geometry_mask = gdk::WindowHints::empty();
         let (min_width, min_height) = attributes
             .min_surface_size
             .inspect(|_| geometry_mask |= gdk::WindowHints::MIN_SIZE)
-            .map(|size| size.to_logical::<i32>(scale_factor as _).into())
-            .unwrap_or((-1, -1));
+            .map_or((-1, -1), |size| size.to_logical::<i32>(scale_factor as _).into());
         let (max_width, max_height) = attributes
             .max_surface_size
             .inspect(|_| geometry_mask |= gdk::WindowHints::MAX_SIZE)
-            .map(|size| size.to_logical::<i32>(scale_factor as _).into())
-            .unwrap_or((-1, -1));
+            .map_or((-1, -1), |size| size.to_logical::<i32>(scale_factor as _).into());
         let (width_inc, height_inc) = attributes
             .surface_resize_increments
             .inspect(|_| geometry_mask |= gdk::WindowHints::RESIZE_INC)
-            .map(|size| size.to_logical::<i32>(scale_factor as _).into())
-            .unwrap_or((0, 0));
+            .map_or((0, 0), |size| size.to_logical::<i32>(scale_factor as _).into());
         window.set_geometry_hints(
             None::<&gtk::Window>,
             Some(&gdk::Geometry::new(
@@ -200,7 +197,7 @@ impl Window {
                 Fullscreen::Borderless(None) => {
                     window.fullscreen();
                 },
-                Fullscreen::Exclusive(_, _) => {
+                Fullscreen::Exclusive(..) => {
                     return Err(RequestError::NotSupported(NotSupportedError::new(
                         "GTK backend does not support exclusive fullscreen modes",
                     )));
@@ -258,20 +255,20 @@ impl Window {
         window.realize(); // Ensure window.window() is created
 
         let id = WindowId::from_raw(window.id() as _);
-        let state = Arc::new(WindowState::new(&window));
-        event_loop.windows.borrow_mut().insert(
-            id,
-            EventLoopWindow { window: window.clone(), default_vbox, state: state.clone() },
-        );
+        let state = SharedWindowState::new(&window);
+        event_loop.windows.borrow_mut().insert(id, EventLoopWindow {
+            window: window.clone(),
+            default_vbox,
+            state: state.clone(),
+        });
 
-        if let Err(e) = event_loop.window_requests_tx.send_blocking((
-            id,
-            WindowRequest::WireUpEvents {
+        if let Err(e) =
+            event_loop.window_requests_tx.send_blocking((id, WindowRequest::WireUpEvents {
                 transparent_draw: attributes.transparent && pl_attributes.transparent_draw,
                 pointer_moved: pl_attributes.pointer_moved,
                 fullscreen: attributes.fullscreen.is_some(),
-            },
-        )) {
+            }))
+        {
             tracing::warn!("Failed to send WindowRequest::WireUpEvents: {e}");
         }
         event_loop.context.wakeup();
