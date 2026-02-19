@@ -35,5 +35,6 @@ compile_error!("The platform you're compiling for is not supported by winit");
 
 #[cfg(all(gtk_platform, any(x11_platform, wayland_platform)))]
 compile_error!(
-    "The gtk backend conflicts with the x11 and wayland backends. Please either select the `gtk` feature or the `x11`/`wayland` features, but not both."
+    "The gtk backend conflicts with the x11 and wayland backends. Please either select the `gtk` \
+     feature or the `x11`/`wayland` features, but not both."
 );

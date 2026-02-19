@@ -12,7 +12,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 #[path = "util/fill.rs"]
 mod fill;
 #[path = "util/tracing.rs"]
-mod tracing;
+mod tracing_init;
 
 #[derive(Default, Debug)]
 struct App {
@@ -37,7 +37,28 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        println!("{event:?}");
+        match event {
+            WindowEvent::SurfaceResized(_) => {
+                if let Some(window) = self.window.as_ref() {
+                    tracing::info!(
+                        "SurfaceResized: surface={}, outer={}",
+                        window.surface_size(),
+                        window.outer_size()
+                    );
+                }
+            },
+            WindowEvent::Moved(_) => {
+                if let Some(window) = self.window.as_ref() {
+                    tracing::info!(
+                        "Moved: surface={}, outer={}",
+                        window.surface_position(),
+                        window.outer_position().unwrap()
+                    );
+                }
+            },
+            _ => {},
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 println!("Close was requested; stopping");
@@ -73,7 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(web_platform)]
     console_error_panic_hook::set_once();
 
-    tracing::init();
+    tracing_init::init();
 
     let event_loop = EventLoop::new()?;
 

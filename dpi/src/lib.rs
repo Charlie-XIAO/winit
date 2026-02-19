@@ -390,6 +390,12 @@ pub struct LogicalPosition<P> {
     pub y: P,
 }
 
+impl<P: std::fmt::Display> std::fmt::Display for LogicalPosition<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
+    }
+}
+
 impl<P> LogicalPosition<P> {
     #[inline]
     pub const fn new(x: P, y: P) -> Self {
@@ -464,6 +470,12 @@ impl<P: Pixel> From<LogicalPosition<P>> for mint::Point2<P> {
 pub struct PhysicalPosition<P> {
     pub x: P,
     pub y: P,
+}
+
+impl<P: std::fmt::Display> std::fmt::Display for PhysicalPosition<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
+    }
 }
 
 impl<P> PhysicalPosition<P> {
@@ -542,6 +554,12 @@ pub struct LogicalSize<P> {
     pub height: P,
 }
 
+impl<P: std::fmt::Display> std::fmt::Display for LogicalSize<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.width, self.height)
+    }
+}
+
 impl<P> LogicalSize<P> {
     #[inline]
     pub const fn new(width: P, height: P) -> Self {
@@ -616,6 +634,12 @@ impl<P: Pixel> From<LogicalSize<P>> for mint::Vector2<P> {
 pub struct PhysicalSize<P> {
     pub width: P,
     pub height: P,
+}
+
+impl<P: std::fmt::Display> std::fmt::Display for PhysicalSize<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.width, self.height)
+    }
 }
 
 impl<P> PhysicalSize<P> {
