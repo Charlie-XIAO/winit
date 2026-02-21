@@ -140,13 +140,14 @@ impl Window {
                 Fullscreen::Borderless(Some(m)) => {
                     let display = gtk::prelude::RootExt::display(&window);
                     if let Some(target) = m.cast_ref::<MonitorHandle>() {
-                        for monitor in display.monitors().iter::<gdk::Monitor>() {
-                            if let Ok(monitor) = monitor
-                                && monitor == target.0
-                            {
-                                window.fullscreen_on_monitor(&monitor);
-                                break;
-                            }
+                        let found = display
+                            .monitors()
+                            .iter::<gdk::Monitor>()
+                            .any(|res| res.ok().map_or(false, |m| m == target.0));
+                        if found {
+                            window.fullscreen_on_monitor(&target.0);
+                        } else {
+                            tracing::warn!("Cannot find the monitor specified for fullscreen");
                         }
                     }
                 },
@@ -154,9 +155,7 @@ impl Window {
                     window.fullscreen();
                 },
                 Fullscreen::Exclusive(..) => {
-                    return Err(RequestError::NotSupported(NotSupportedError::new(
-                        "GTK backend does not support exclusive fullscreen modes",
-                    )));
+                    tracing::warn!("GTK backend does not support exclusive fullscreen mode");
                 },
             }
         }
@@ -174,15 +173,17 @@ impl Window {
 
         let id = WindowId::from_raw(window.id() as _);
         let state = SharedWindowState::new(&window, &drawing_area);
-        event_loop.windows.borrow_mut().insert(
-            id,
-            EventLoopWindow { window: window.clone(), drawing_area, state: state.clone() },
-        );
+        event_loop.windows.borrow_mut().insert(id, EventLoopWindow {
+            window: window.clone(),
+            drawing_area,
+            state: state.clone(),
+        });
 
-        if let Err(e) = event_loop.window_requests_tx.send_blocking((
-            id,
-            WindowRequest::WireUpEvents { fullscreen: attributes.fullscreen.is_some() },
-        )) {
+        if let Err(e) =
+            event_loop.window_requests_tx.send_blocking((id, WindowRequest::WireUpEvents {
+                fullscreen: attributes.fullscreen.is_some(),
+            }))
+        {
             tracing::warn!("Failed to send WindowRequest::WireUpEvents: {e}");
         }
         event_loop.context.wakeup();

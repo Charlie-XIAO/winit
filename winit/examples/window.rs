@@ -47,15 +47,6 @@ impl ApplicationHandler for App {
                     );
                 }
             },
-            WindowEvent::Moved(_) => {
-                if let Some(window) = self.window.as_ref() {
-                    tracing::info!(
-                        "Moved: surface={}, outer={}",
-                        window.surface_position(),
-                        window.outer_position().unwrap()
-                    );
-                }
-            },
             _ => {},
         }
 
