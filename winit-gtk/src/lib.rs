@@ -29,16 +29,14 @@ use self::window::Window as GtkWindow;
 /// [`Window`]: crate::window::Window
 pub trait WindowExtGtk {
     fn set_focusable(&self, focusable: bool);
-    fn set_skip_taskbar(&self, skip_taskbar: bool);
-    fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>);
 
     fn with_gtk_window<F>(&self, f: F)
     where
         F: FnOnce(&gtk::ApplicationWindow) + Send + 'static;
 
-    fn with_default_vbox<F>(&self, f: F)
+    fn with_gtk_drawing_area<F>(&self, f: F)
     where
-        F: FnOnce(Option<&gtk::Box>) + Send + 'static;
+        F: FnOnce(&gtk::DrawingArea) + Send + 'static;
 }
 
 impl WindowExtGtk for dyn CoreWindow + '_ {
@@ -46,18 +44,6 @@ impl WindowExtGtk for dyn CoreWindow + '_ {
     fn set_focusable(&self, focusable: bool) {
         let window = self.cast_ref::<GtkWindow>().unwrap();
         window.set_focusable(focusable)
-    }
-
-    #[inline]
-    fn set_skip_taskbar(&self, skip_taskbar: bool) {
-        let window = self.cast_ref::<GtkWindow>().unwrap();
-        window.set_skip_taskbar(skip_taskbar)
-    }
-
-    #[inline]
-    fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
-        let window = self.cast_ref::<GtkWindow>().unwrap();
-        window.set_badge_count(count, desktop_filename)
     }
 
     #[inline]
@@ -70,12 +56,12 @@ impl WindowExtGtk for dyn CoreWindow + '_ {
     }
 
     #[inline]
-    fn with_default_vbox<F>(&self, f: F)
+    fn with_gtk_drawing_area<F>(&self, f: F)
     where
-        F: FnOnce(Option<&gtk::Box>) + Send + 'static,
+        F: FnOnce(&gtk::DrawingArea) + Send + 'static,
     {
         let window = self.cast_ref::<GtkWindow>().unwrap();
-        window.with_default_vbox(f)
+        window.with_gtk_drawing_area(f)
     }
 }
 
@@ -83,12 +69,6 @@ impl WindowExtGtk for dyn CoreWindow + '_ {
 #[derive(Debug, Clone)]
 pub struct WindowAttributesGtk {
     pub(crate) focusable: bool,
-    pub(crate) skip_taskbar: bool,
-    pub(crate) transparent_draw: bool,
-    pub(crate) app_paintable: bool,
-    pub(crate) rgba_visual: bool,
-    pub(crate) pointer_moved: bool,
-    pub(crate) default_vbox: bool,
 }
 
 impl WindowAttributesGtk {
@@ -97,56 +77,12 @@ impl WindowAttributesGtk {
         self.focusable = focusable;
         self
     }
-
-    #[inline]
-    pub fn with_skip_taskbar(mut self, skip_taskbar: bool) -> Self {
-        self.skip_taskbar = skip_taskbar;
-        self
-    }
-
-    #[inline]
-    pub fn with_transparent_draw(mut self, transparent_draw: bool) -> Self {
-        self.transparent_draw = transparent_draw;
-        self
-    }
-
-    #[inline]
-    pub fn with_app_paintable(mut self, app_paintable: bool) -> Self {
-        self.app_paintable = app_paintable;
-        self
-    }
-
-    #[inline]
-    pub fn with_rgba_visual(mut self, rgba_visual: bool) -> Self {
-        self.rgba_visual = rgba_visual;
-        self
-    }
-
-    #[inline]
-    pub fn with_pointer_moved(mut self, pointer_moved: bool) -> Self {
-        self.pointer_moved = pointer_moved;
-        self
-    }
-
-    #[inline]
-    pub fn with_default_vbox(mut self, default_vbox: bool) -> Self {
-        self.default_vbox = default_vbox;
-        self
-    }
 }
 
 impl Default for WindowAttributesGtk {
     #[inline]
     fn default() -> Self {
-        Self {
-            focusable: true,
-            skip_taskbar: false,
-            transparent_draw: false,
-            app_paintable: false,
-            rgba_visual: false,
-            pointer_moved: true,
-            default_vbox: true,
-        }
+        Self { focusable: true }
     }
 }
 
@@ -179,7 +115,6 @@ pub trait ActiveEventLoopExtGtk {
     fn is_wayland(&self) -> bool;
     fn is_x11(&self) -> bool;
     fn gtk_app(&self) -> &gtk::Application;
-    fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>);
 }
 
 impl ActiveEventLoopExtGtk for dyn CoreActiveEventLoop + '_ {
@@ -199,11 +134,5 @@ impl ActiveEventLoopExtGtk for dyn CoreActiveEventLoop + '_ {
     fn gtk_app(&self) -> &gtk::Application {
         let event_loop = self.cast_ref::<GtkActiveEventLoop>().unwrap();
         event_loop.gtk_app()
-    }
-
-    #[inline]
-    fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
-        let event_loop = self.cast_ref::<GtkActiveEventLoop>().unwrap();
-        event_loop.set_badge_count(count, desktop_filename)
     }
 }

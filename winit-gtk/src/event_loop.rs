@@ -81,7 +81,7 @@ impl Default for PlatformSpecificEventLoopAttributes {
 #[derive(Debug, Clone)]
 pub(crate) struct EventLoopWindow {
     pub(crate) window: gtk::ApplicationWindow,
-    pub(crate) default_vbox: Option<gtk::Box>,
+    pub(crate) drawing_area: gtk::DrawingArea,
     pub(crate) state: SharedWindowState,
 }
 
@@ -116,12 +116,6 @@ impl ActiveEventLoop {
     pub(crate) fn gtk_app(&self) -> &gtk::Application {
         &self.app
     }
-
-    pub(crate) fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
-        let _ = count;
-        let _ = desktop_filename;
-        todo!()
-    }
 }
 
 impl CoreActiveEventLoop for ActiveEventLoop {
@@ -147,16 +141,18 @@ impl CoreActiveEventLoop for ActiveEventLoop {
     }
 
     fn available_monitors(&self) -> Box<dyn Iterator<Item = CoreMonitorHandle>> {
-        let n = self.display.n_monitors();
-        let monitors: Vec<_> = (0..n)
-            .filter_map(|i| self.display.monitor(i))
+        let monitors: Vec<_> = self
+            .display
+            .monitors()
+            .iter::<gdk::Monitor>()
+            .filter_map(|m| m.ok())
             .map(|m| CoreMonitorHandle(Arc::new(MonitorHandle(m))))
             .collect();
         Box::new(monitors.into_iter())
     }
 
     fn primary_monitor(&self) -> Option<CoreMonitorHandle> {
-        self.display.primary_monitor().map(|m| CoreMonitorHandle(Arc::new(MonitorHandle(m))))
+        None // No concept of a primary monitor
     }
 
     fn listen_device_events(&self, allowed: DeviceEvents) {
@@ -334,7 +330,7 @@ impl EventLoop {
         self.events_rx.has_incoming()
             || self.redraw_rx.has_incoming()
             || self.window_target.proxy_wake_flag.load(Ordering::Acquire)
-            || gtk::events_pending()
+            || self.context.pending()
     }
 
     fn poll_events_with_timeout<A: ApplicationHandler>(
@@ -386,8 +382,8 @@ impl EventLoop {
     fn gtk_poll(&self, timeout: Option<Duration>) {
         match timeout {
             Some(timeout) if timeout == Duration::ZERO => {
-                while gtk::events_pending() {
-                    gtk::main_iteration_do(false);
+                while self.context.pending() {
+                    self.context.iteration(false);
                 }
             },
             Some(timeout) => {
@@ -399,9 +395,9 @@ impl EventLoop {
                     glib::ControlFlow::Break
                 });
 
-                gtk::main_iteration_do(true);
-                while gtk::events_pending() {
-                    gtk::main_iteration_do(false);
+                self.context.iteration(true);
+                while self.context.pending() {
+                    self.context.iteration(false);
                 }
 
                 // The flag was not set meaning something else woke us first, so
@@ -411,9 +407,9 @@ impl EventLoop {
                 }
             },
             None => {
-                gtk::main_iteration_do(true);
-                while gtk::events_pending() {
-                    gtk::main_iteration_do(false);
+                self.context.iteration(true);
+                while self.context.pending() {
+                    self.context.iteration(false);
                 }
             },
         }
@@ -497,15 +493,15 @@ impl OwnedDisplayHandle {
             panic!("GDK backend is wayland but winit-gtk was built without the `wayland` feature");
         } else if backend.is_x11() {
             #[cfg(feature = "x11")]
-            if let Ok(xlib) = x11_dl::xlib::Xlib::open() {
-                let dpy = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
-                let screen = (!dpy.is_null())
-                    .then(|| unsafe { (xlib.XDefaultScreen)(dpy) })
-                    .unwrap_or_default();
-                NonNull::new(dpy as *mut _)
+            {
+                let xdisplay = unsafe {
+                    gdk_x11_sys::gdk_x11_display_get_xdisplay(display.as_ptr() as *mut _)
+                };
+                let xscreen =
+                    unsafe { gdk_x11_sys::gdk_x11_display_get_screen(display.as_ptr() as *mut _) };
+                let screen = unsafe { gdk_x11_sys::gdk_x11_screen_get_screen_number(xscreen) };
+                NonNull::new(xdisplay)
                     .map_or(Self::Unavailable, |display| Self::X11 { display, screen })
-            } else {
-                Self::Unavailable
             }
             #[cfg(not(feature = "x11"))]
             panic!("GDK backend is X11 but winit-gtk was built without the `x11` feature");

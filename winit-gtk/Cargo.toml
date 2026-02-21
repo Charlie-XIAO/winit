@@ -12,8 +12,8 @@ version.workspace = true
 default = ["x11", "wayland"]
 
 serde = ["dep:serde", "bitflags/serde", "smol_str/serde", "dpi/serde"]
-x11 = ["x11-dl", "gdkx11-sys"]
-wayland = ["gdkwayland-sys"]
+x11 = ["gdk-x11-sys"]
+wayland = ["gdk-wayland-sys"]
 
 [dependencies]
 bitflags.workspace = true
@@ -26,12 +26,11 @@ tracing.workspace = true
 winit-core.workspace = true
 
 # Platform-specific
-gtk = "0.18"
-gdkx11-sys = { version = "0.18", optional = true }
-gdkwayland-sys = { version = "0.18", optional = true }
+gtk = { package = "gtk4", version = "0.10" }
+gdk-x11-sys = { package = "gdk4-x11-sys", version = "0.10", optional = true }
+gdk-wayland-sys = { package = "gdk4-wayland-sys", version = "0.10", optional = true }
 crossbeam-channel = "0.5"
 async-channel = "2.5"
-x11-dl = { workspace = true, optional = true }
 winit-common = { workspace = true, features = ["free-unix"] }
 
 [package.metadata.docs.rs]

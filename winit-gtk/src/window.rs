@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use dpi::{PhysicalInsets, PhysicalPosition, PhysicalSize, Position, Size};
 use gtk::prelude::*;
-use gtk::{gdk, gdk_pixbuf, glib};
+use gtk::{gdk, glib};
 use winit_core::cursor::Cursor;
 use winit_core::error::{NotSupportedError, RequestError};
-use winit_core::icon::{Icon, RgbaIcon};
+use winit_core::icon::Icon;
 use winit_core::monitor::{Fullscreen, MonitorHandle as CoreMonitorHandle};
 use winit_core::window::{
     CursorGrabMode, ImeCapabilities, ImeRequest, ImeRequestError, ResizeDirection, Theme,
@@ -47,24 +47,14 @@ impl Window {
             .and_then(|attrs| attrs.cast::<WindowAttributesGtk>().ok())
             .unwrap_or_default();
 
-        let mut builder = gtk::ApplicationWindow::builder()
+        let window = gtk::ApplicationWindow::builder()
             .application(&event_loop.app)
             .deletable(attributes.enabled_buttons.contains(WindowButtons::CLOSE))
             .title(attributes.title)
             .visible(attributes.visible)
             .decorated(attributes.decorations)
-            .accept_focus(attributes.active && pl_attributes.focusable)
-            .skip_taskbar_hint(pl_attributes.skip_taskbar)
-            .skip_pager_hint(pl_attributes.skip_taskbar);
-
-        if let Some(window_icon) = attributes.window_icon
-            && let Some(icon) = window_icon.cast_ref::<RgbaIcon>()
-        {
-            let pixbuf = pixbuf_from_rgba_icon(icon);
-            builder = builder.icon(&pixbuf);
-        }
-
-        let window = builder.build();
+            .can_focus(attributes.active && pl_attributes.focusable)
+            .build();
 
         let scale_factor = window.scale_factor();
 
@@ -72,42 +62,11 @@ impl Window {
             .surface_size
             .map_or((800, 600), |size| size.to_logical::<i32>(scale_factor as _).into());
         window.set_default_size(width, height);
-        window.resize(width, height);
 
-        let mut geometry_mask = gdk::WindowHints::empty();
-        let (min_width, min_height) = attributes
-            .min_surface_size
-            .inspect(|_| geometry_mask |= gdk::WindowHints::MIN_SIZE)
-            .map_or((-1, -1), |size| size.to_logical::<i32>(scale_factor as _).into());
-        let (max_width, max_height) = attributes
-            .max_surface_size
-            .inspect(|_| geometry_mask |= gdk::WindowHints::MAX_SIZE)
-            .map_or((-1, -1), |size| size.to_logical::<i32>(scale_factor as _).into());
-        let (width_inc, height_inc) = attributes
-            .surface_resize_increments
-            .inspect(|_| geometry_mask |= gdk::WindowHints::RESIZE_INC)
-            .map_or((0, 0), |size| size.to_logical::<i32>(scale_factor as _).into());
-        window.set_geometry_hints(
-            None::<&gtk::Window>,
-            Some(&gdk::Geometry::new(
-                min_width,
-                min_height,
-                max_width,
-                max_height,
-                0,
-                0,
-                width_inc,
-                height_inc,
-                0.,
-                0.,
-                gdk::Gravity::NorthWest,
-            )),
-            geometry_mask,
-        );
-
-        if let Some(position) = attributes.position {
-            let (x, y) = position.to_logical::<i32>(scale_factor as _).into();
-            window.move_(x, y);
+        if let Some(min_surface_size) = attributes.min_surface_size {
+            let (min_width, min_height) =
+                min_surface_size.to_logical::<i32>(scale_factor as _).into();
+            window.set_size_request(min_width, min_height);
         }
 
         if attributes.maximized {
@@ -148,11 +107,9 @@ impl Window {
             window.set_resizable(attributes.resizable);
         }
 
-        match attributes.window_level {
-            WindowLevel::Normal => {},
-            WindowLevel::AlwaysOnTop => window.set_keep_above(true),
-            WindowLevel::AlwaysOnBottom => window.set_keep_below(true),
-        }
+        // TODO: handle attributes.icon
+        // TODO: handle attributes.position
+        // TODO: handle attributes.window_level
 
         if let Some(settings) = gtk::Settings::default()
             && let Some(preferred_theme) = attributes.preferred_theme
@@ -181,14 +138,13 @@ impl Window {
         if let Some(ref fullscreen) = attributes.fullscreen {
             match fullscreen {
                 Fullscreen::Borderless(Some(m)) => {
-                    let display = window.display();
+                    let display = gtk::prelude::RootExt::display(&window);
                     if let Some(target) = m.cast_ref::<MonitorHandle>() {
-                        for i in 0..display.n_monitors() {
-                            if let Some(monitor) = display.monitor(i)
+                        for monitor in display.monitors().iter::<gdk::Monitor>() {
+                            if let Ok(monitor) = monitor
                                 && monitor == target.0
                             {
-                                let screen = display.default_screen();
-                                window.fullscreen_on_monitor(&screen, i);
+                                window.fullscreen_on_monitor(&monitor);
                                 break;
                             }
                         }
@@ -205,76 +161,34 @@ impl Window {
             }
         }
 
-        if pl_attributes.app_paintable || attributes.transparent {
-            window.set_app_paintable(true);
-        }
-
-        if (pl_attributes.rgba_visual || attributes.transparent)
-            && let Some(screen) = gtk::prelude::GtkWindowExt::screen(&window)
-            && let Some(visual) = screen.rgba_visual()
-        {
-            window.set_visual(Some(&visual));
-        }
-
-        let default_vbox = if pl_attributes.default_vbox {
-            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            window.add(&vbox);
-            Some(vbox)
-        } else {
-            None
-        };
+        let drawing_area = gtk::DrawingArea::new();
+        drawing_area.set_hexpand(true);
+        drawing_area.set_vexpand(true);
+        window.set_child(Some(&drawing_area));
 
         // TODO: handle attributes.cursor
 
         if attributes.visible {
-            window.show_all();
-            if attributes.active {
-                window.present();
-            }
-        } else {
-            window.hide();
+            window.present();
         }
-
-        // If the window was created as not active (focused) but needs to be
-        // focusable, we should restore accept-focus after the first draw
-        if pl_attributes.focusable && !attributes.active {
-            let signal_id = Rc::new(RefCell::new(None));
-            let id = {
-                let signal_id = signal_id.clone();
-                window.connect_draw(move |w, _| {
-                    if let Some(id) = signal_id.borrow_mut().take() {
-                        w.set_accept_focus(true);
-                        w.disconnect(id);
-                    }
-                    glib::Propagation::Proceed
-                })
-            };
-            *signal_id.borrow_mut() = Some(id);
-        }
-
-        window.realize(); // Ensure window.window() is created
 
         let id = WindowId::from_raw(window.id() as _);
-        let state = SharedWindowState::new(&window);
-        event_loop.windows.borrow_mut().insert(id, EventLoopWindow {
-            window: window.clone(),
-            default_vbox,
-            state: state.clone(),
-        });
+        let state = SharedWindowState::new(&window, &drawing_area);
+        event_loop.windows.borrow_mut().insert(
+            id,
+            EventLoopWindow { window: window.clone(), drawing_area, state: state.clone() },
+        );
 
-        if let Err(e) =
-            event_loop.window_requests_tx.send_blocking((id, WindowRequest::WireUpEvents {
-                transparent_draw: attributes.transparent && pl_attributes.transparent_draw,
-                pointer_moved: pl_attributes.pointer_moved,
-                fullscreen: attributes.fullscreen.is_some(),
-            }))
-        {
+        if let Err(e) = event_loop.window_requests_tx.send_blocking((
+            id,
+            WindowRequest::WireUpEvents { fullscreen: attributes.fullscreen.is_some() },
+        )) {
             tracing::warn!("Failed to send WindowRequest::WireUpEvents: {e}");
         }
         event_loop.context.wakeup();
 
-        let raw = window.window().map_or(OwnedWindowHandle::Unavailable, |window| {
-            OwnedWindowHandle::new(&window, event_loop.backend())
+        let raw = window.surface().map_or(OwnedWindowHandle::Unavailable, |surface| {
+            OwnedWindowHandle::new(&surface, event_loop.backend())
         });
 
         Ok(Self {
@@ -293,17 +207,6 @@ impl Window {
         todo!()
     }
 
-    pub(crate) fn set_skip_taskbar(&self, skip_taskbar: bool) {
-        let _ = skip_taskbar;
-        todo!()
-    }
-
-    pub(crate) fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {
-        let _ = count;
-        let _ = desktop_filename;
-        todo!()
-    }
-
     pub(crate) fn with_gtk_window<F>(&self, f: F)
     where
         F: FnOnce(&gtk::ApplicationWindow) + Send + 'static,
@@ -317,15 +220,15 @@ impl Window {
         self.context.wakeup();
     }
 
-    pub(crate) fn with_default_vbox<F>(&self, f: F)
+    pub(crate) fn with_gtk_drawing_area<F>(&self, f: F)
     where
-        F: FnOnce(Option<&gtk::Box>) + Send + 'static,
+        F: FnOnce(&gtk::DrawingArea) + Send + 'static,
     {
         if let Err(e) = self
             .window_requests_tx
-            .send_blocking((self.id, WindowRequest::WithDefaultVbox(Box::new(f))))
+            .send_blocking((self.id, WindowRequest::WithGtkDrawingArea(Box::new(f))))
         {
-            tracing::warn!("Failed to send WindowRequest::WithDefaultVbox: {e}");
+            tracing::warn!("Failed to send WindowRequest::WithGtkDrawingArea: {e}");
         }
         self.context.wakeup();
     }
@@ -366,23 +269,26 @@ impl CoreWindow for Window {
         self.context.wakeup();
     }
 
-    fn pre_present_notify(&self) {}
+    fn pre_present_notify(&self) {
+        // TODO: should this do anything?
+    }
 
     fn reset_dead_keys(&self) {
         todo!()
     }
 
     fn surface_position(&self) -> PhysicalPosition<i32> {
-        self.state.surface_position()
+        (0, 0).into()
     }
 
     fn outer_position(&self) -> Result<PhysicalPosition<i32>, RequestError> {
-        Ok(self.state.outer_position())
+        Err(RequestError::NotSupported(NotSupportedError::new(
+            "window position information is not available on GTK",
+        )))
     }
 
-    fn set_outer_position(&self, position: Position) {
-        let _ = position;
-        todo!()
+    fn set_outer_position(&self, _position: Position) {
+        // Not possible
     }
 
     fn surface_size(&self) -> PhysicalSize<u32> {
@@ -413,12 +319,11 @@ impl CoreWindow for Window {
     }
 
     fn surface_resize_increments(&self) -> Option<PhysicalSize<u32>> {
-        todo!()
+        None // Not supported by GTK
     }
 
     fn set_surface_resize_increments(&self, increments: Option<Size>) {
-        let _ = increments;
-        todo!()
+        tracing::warn!("GTK does not support setting surface resize increments");
     }
 
     fn set_title(&self, title: &str) {
@@ -633,24 +538,22 @@ unsafe impl Send for OwnedWindowHandle {}
 unsafe impl Sync for OwnedWindowHandle {}
 
 impl OwnedWindowHandle {
-    fn new(window: &gdk::Window, backend: gdk::Backend) -> Self {
+    fn new(surface: &gdk::Surface, backend: gdk::Backend) -> Self {
         if backend.is_wayland() {
             #[cfg(feature = "wayland")]
             {
                 let wl = unsafe {
-                    gdk_wayland_sys::gdk_wayland_window_get_wl_surface(window.as_ptr() as *mut _)
+                    gdk_wayland_sys::gdk_wayland_surface_get_wl_surface(surface.as_ptr() as *mut _)
                 };
-                match NonNull::new(wl) {
-                    Some(surface) => Self::Wayland { surface },
-                    None => Self::Unavailable,
-                }
+                NonNull::new(wl).map_or(Self::Unavailable, |surface| Self::Wayland { surface })
             }
             #[cfg(not(feature = "wayland"))]
             panic!("GDK backend is wayland but winit-gtk was built without the `wayland` feature");
         } else if backend.is_x11() {
             #[cfg(feature = "x11")]
             {
-                let xid = unsafe { gdk_x11_sys::gdk_x11_window_get_xid(window.as_ptr() as *mut _) };
+                let xid =
+                    unsafe { gdk_x11_sys::gdk_x11_surface_get_xid(surface.as_ptr() as *mut _) };
                 if xid == 0 { Self::Unavailable } else { Self::X11 { xid } }
             }
             #[cfg(not(feature = "x11"))]
@@ -677,27 +580,4 @@ impl rwh_06::HasWindowHandle for OwnedWindowHandle {
 
         Ok(unsafe { rwh_06::WindowHandle::borrow_raw(raw) })
     }
-}
-
-fn pixbuf_from_rgba_icon(icon: &RgbaIcon) -> gdk_pixbuf::Pixbuf {
-    let width = icon.width() as i32;
-    let height = icon.height() as i32;
-
-    let rowstride = gdk_pixbuf::Pixbuf::calculate_rowstride(
-        gdk_pixbuf::Colorspace::Rgb,
-        true,
-        8,
-        width,
-        height,
-    );
-
-    gdk_pixbuf::Pixbuf::from_mut_slice(
-        icon.buffer().to_vec(),
-        gdk_pixbuf::Colorspace::Rgb,
-        true,
-        8,
-        width,
-        height,
-        rowstride,
-    )
 }

@@ -1,6 +1,6 @@
-use dpi::{LogicalPosition, LogicalSize};
+use dpi::LogicalSize;
+use gtk::glib;
 use gtk::prelude::*;
-use gtk::{cairo, gdk, glib};
 use winit_core::event::WindowEvent;
 use winit_core::window::WindowId;
 
@@ -14,8 +14,8 @@ pub enum WindowRequest {
     Resizable(bool),
     Destroy,
     WithGtkWindow(Box<dyn FnOnce(&gtk::ApplicationWindow) + Send + 'static>),
-    WithDefaultVbox(Box<dyn FnOnce(Option<&gtk::Box>) + Send + 'static>),
-    WireUpEvents { transparent_draw: bool, pointer_moved: bool, fullscreen: bool },
+    WithGtkDrawingArea(Box<dyn FnOnce(&gtk::DrawingArea) + Send + 'static>),
+    WireUpEvents { fullscreen: bool },
 }
 
 pub async fn handle_window_requests(
@@ -27,25 +27,22 @@ pub async fn handle_window_requests(
     while let Ok((id, request)) = window_requests_rx.recv().await {
         if matches!(request, WindowRequest::Destroy) {
             if let Some(window) = windows.borrow_mut().remove(&id) {
-                unsafe {
-                    window.window.destroy();
-                }
+                window.window.destroy();
             }
             continue;
         }
 
         if let Some(window) = windows.borrow().get(&id).cloned() {
-            let EventLoopWindow { window, default_vbox, state } = window;
+            let EventLoopWindow { window, drawing_area, state } = window;
 
             match request {
                 WindowRequest::Title(title) => {
-                    window.set_title(&title);
+                    window.set_title(Some(&title));
                 },
                 WindowRequest::Visible(visible) => {
+                    window.set_visible(visible);
                     if visible {
-                        window.show_all();
-                    } else {
-                        window.hide();
+                        window.present();
                     }
                 },
                 WindowRequest::Resizable(resizable) => {
@@ -54,18 +51,17 @@ pub async fn handle_window_requests(
                 WindowRequest::WithGtkWindow(f) => {
                     f(&window);
                 },
-                WindowRequest::WithDefaultVbox(f) => {
-                    f(default_vbox.as_ref());
+                WindowRequest::WithGtkDrawingArea(f) => {
+                    f(&drawing_area);
                 },
-                WindowRequest::WireUpEvents { transparent_draw, pointer_moved, fullscreen } => {
+                WindowRequest::WireUpEvents { fullscreen } => {
                     handle_wire_up_events(
                         id,
                         &window,
+                        &drawing_area,
                         state,
                         events_tx.clone(),
                         redraw_tx.clone(),
-                        transparent_draw,
-                        pointer_moved,
                         fullscreen,
                     );
                 },
@@ -78,25 +74,13 @@ pub async fn handle_window_requests(
 fn handle_wire_up_events(
     id: WindowId,
     window: &gtk::ApplicationWindow,
+    drawing_area: &gtk::DrawingArea,
     state: SharedWindowState,
     events_tx: crossbeam_channel::Sender<QueuedEvent>,
     redraw_tx: crossbeam_channel::Sender<WindowId>,
-    transparent_draw: bool,
-    pointer_moved: bool,
     fullscreen: bool,
 ) {
-    let _ = pointer_moved;
     let _ = fullscreen;
-
-    window.add_events(
-        gdk::EventMask::POINTER_MOTION_MASK
-            | gdk::EventMask::BUTTON1_MOTION_MASK
-            | gdk::EventMask::BUTTON_PRESS_MASK
-            | gdk::EventMask::TOUCH_MASK
-            | gdk::EventMask::STRUCTURE_MASK
-            | gdk::EventMask::FOCUS_CHANGE_MASK
-            | gdk::EventMask::SCROLL_MASK,
-    );
 
     // Handle when the scale factor of the window changes
     {
@@ -117,7 +101,7 @@ fn handle_wire_up_events(
     // Handle when user requests to close the window
     {
         let tx = events_tx.clone();
-        window.connect_delete_event(move |_, _| {
+        window.connect_close_request(move |_| {
             if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::CloseRequested })
             {
                 tracing::warn!("Failed to send WindowEvent::CloseRequested: {e}");
@@ -126,84 +110,36 @@ fn handle_wire_up_events(
         });
     }
 
-    // Handle when the size or position of the window changes
+    // Handle when the window is resized
+    {
+        let state = state.clone();
+        if let Some(surface) = window.surface() {
+            surface.connect_layout(move |_, width, height| {
+                state.update_outer_size(width, height);
+            });
+        }
+    }
+
+    // Handle when the drawing area is resized
     {
         let tx = events_tx.clone();
         let state = state.clone();
-        window.connect_configure_event(move |window, event| {
-            let (inner_x, inner_y) = event.position();
-            let (surface_width, surface_height) = event.size();
+        drawing_area.connect_resize(move |drawing_area, width, height| {
+            state.update_surface_size(width, height);
 
-            let mut surface_x = 0;
-            let mut surface_y = 0;
-            let mut outer_x = inner_x;
-            let mut outer_y = inner_y;
-            let mut outer_width = surface_width;
-            let mut outer_height = surface_height;
-
-            if let Some(window) = window.window() {
-                let frame = window.frame_extents();
-                outer_x = frame.x();
-                outer_y = frame.y();
-                outer_width = frame.width() as _;
-                outer_height = frame.height() as _;
-                surface_x = inner_x - outer_x;
-                surface_y = inner_y - outer_y;
+            let scale_factor = drawing_area.scale_factor() as f64;
+            let size = LogicalSize::new(width, height).to_physical(scale_factor);
+            if let Err(e) =
+                tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
+            {
+                tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
             }
-
-            let (surface_size_changed, outer_position_changed) = state.update_position_and_size(
-                surface_x,
-                surface_y,
-                surface_width as _,
-                surface_height as _,
-                outer_x,
-                outer_y,
-                outer_width as _,
-                outer_height as _,
-            );
-
-            let scale_factor = window.scale_factor() as f64;
-
-            if surface_size_changed {
-                let size =
-                    LogicalSize::new(surface_width, surface_height).to_physical(scale_factor);
-                if let Err(e) =
-                    tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
-                {
-                    tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
-                }
-            }
-
-            if outer_position_changed {
-                let pos = LogicalPosition::new(outer_x, outer_y).to_physical(scale_factor);
-                if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::Moved(pos) })
-                {
-                    tracing::warn!("Failed to send WindowEvent::Moved: {e}");
-                }
-            }
-
-            false // Propagate the event further
         });
     }
 
     // Handle when the keyboard focus enters or leaves the window
     {
-        let tx = events_tx.clone();
-        window.connect_focus_in_event(move |_, _| {
-            if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::Focused(true) }) {
-                tracing::warn!("Failed to send WindowEvent::Focused: {e}");
-            }
-            glib::Propagation::Proceed
-        });
-
-        let tx = events_tx.clone();
-        window.connect_focus_out_event(move |_, _| {
-            if let Err(e) = tx.send(QueuedEvent::Window { id, event: WindowEvent::Focused(false) })
-            {
-                tracing::warn!("Failed to send WindowEvent::Focused: {e}");
-            }
-            glib::Propagation::Proceed
-        });
+        // TODO
     }
 
     // Handle when the window is destroyed
@@ -240,23 +176,6 @@ fn handle_wire_up_events(
 
     // Handle when the window needs to be redrawn
     {
-        let tx = redraw_tx.clone();
-        window.connect_draw(move |_, cr| {
-            if let Err(e) = tx.send(id) {
-                tracing::warn!("Failed to send draw event: {e}");
-            }
-
-            // TODO: TAO src/platform_impl/linux/event_loop.rs:L902-L937
-            // Implement when background_color attribute is added, see also
-            // https://github.com/tauri-apps/tao/pull/995
-            if transparent_draw {
-                cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-                cr.set_operator(cairo::Operator::Source);
-                let _ = cr.paint();
-                cr.set_operator(cairo::Operator::Over);
-            }
-
-            glib::Propagation::Proceed
-        });
+        // TODO
     }
 }
