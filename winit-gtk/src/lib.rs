@@ -15,6 +15,7 @@ macro_rules! os_error {
 
 mod event_loop;
 mod monitor;
+mod toplevel;
 mod window;
 mod window_request;
 mod window_state;
@@ -33,10 +34,6 @@ pub trait WindowExtGtk {
     fn with_gtk_window<F>(&self, f: F)
     where
         F: FnOnce(&gtk::ApplicationWindow) + Send + 'static;
-
-    fn with_gtk_drawing_area<F>(&self, f: F)
-    where
-        F: FnOnce(&gtk::DrawingArea) + Send + 'static;
 }
 
 impl WindowExtGtk for dyn CoreWindow + '_ {
@@ -54,24 +51,22 @@ impl WindowExtGtk for dyn CoreWindow + '_ {
         let window = self.cast_ref::<GtkWindow>().unwrap();
         window.with_gtk_window(f)
     }
-
-    #[inline]
-    fn with_gtk_drawing_area<F>(&self, f: F)
-    where
-        F: FnOnce(&gtk::DrawingArea) + Send + 'static,
-    {
-        let window = self.cast_ref::<GtkWindow>().unwrap();
-        window.with_gtk_drawing_area(f)
-    }
 }
 
 /// Window attributes methods specific to GTK.
 #[derive(Debug, Clone)]
 pub struct WindowAttributesGtk {
+    pub(crate) gtk_toplevel: bool,
     pub(crate) focusable: bool,
 }
 
 impl WindowAttributesGtk {
+    #[inline]
+    pub fn with_gtk_toplevel(mut self, gtk_toplevel: bool) -> Self {
+        self.gtk_toplevel = gtk_toplevel;
+        self
+    }
+
     #[inline]
     pub fn with_focusable(mut self, focusable: bool) -> Self {
         self.focusable = focusable;
@@ -82,7 +77,7 @@ impl WindowAttributesGtk {
 impl Default for WindowAttributesGtk {
     #[inline]
     fn default() -> Self {
-        Self { focusable: true }
+        Self { gtk_toplevel: true, focusable: true }
     }
 }
 

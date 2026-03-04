@@ -5,6 +5,8 @@ use std::error::Error;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+#[cfg(gtk_platform)]
+use winit::platform::gtk::WindowAttributesGtk;
 #[cfg(web_platform)]
 use winit::platform::web::WindowAttributesWeb;
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -21,11 +23,17 @@ struct App {
 
 impl ApplicationHandler for App {
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
-        #[cfg(not(web_platform))]
         let window_attributes = WindowAttributes::default();
+
         #[cfg(web_platform)]
-        let window_attributes = WindowAttributes::default()
+        let window_attributes = window_attributes
             .with_platform_attributes(Box::new(WindowAttributesWeb::default().with_append(true)));
+
+        #[cfg(gtk_platform)]
+        let window_attributes = window_attributes.with_platform_attributes(Box::new(
+            WindowAttributesGtk::default().with_gtk_toplevel(false),
+        ));
+
         self.window = match event_loop.create_window(window_attributes) {
             Ok(window) => Some(window),
             Err(err) => {
@@ -71,7 +79,7 @@ impl ApplicationHandler for App {
                 window.pre_present_notify();
 
                 // Draw.
-                fill::fill_window(window.as_ref());
+                // fill::fill_window(window.as_ref());
 
                 // For contiguous redraw loop you can request a redraw from here.
                 // window.request_redraw();

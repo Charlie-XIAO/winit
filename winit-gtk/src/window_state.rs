@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use dpi::{LogicalSize, PhysicalSize};
+use gtk::gdk;
 use gtk::prelude::*;
 
 #[derive(Debug)]
@@ -16,13 +17,23 @@ struct WindowState {
 pub struct SharedWindowState(Arc<Mutex<WindowState>>);
 
 impl SharedWindowState {
-    pub fn new(window: &gtk::ApplicationWindow, drawing_area: &gtk::DrawingArea) -> Self {
+    pub fn new_gtk(window: &gtk::ApplicationWindow) -> Self {
         Self(Arc::new(Mutex::new(WindowState {
             scale_factor: window.scale_factor() as _,
-            surface_width: drawing_area.width(),
-            surface_height: drawing_area.height(),
+            surface_width: window.width(),
+            surface_height: window.height(),
             outer_width: window.width(),
             outer_height: window.height(),
+        })))
+    }
+
+    pub fn new_gdk(toplevel: &gdk::Toplevel) -> Self {
+        Self(Arc::new(Mutex::new(WindowState {
+            scale_factor: toplevel.scale_factor() as _,
+            surface_width: toplevel.width(),
+            surface_height: toplevel.height(),
+            outer_width: toplevel.width(),
+            outer_height: toplevel.height(),
         })))
     }
 

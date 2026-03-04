@@ -20,6 +20,7 @@ use winit_core::window::{
 use crate::WindowAttributesGtk;
 use crate::event_loop::{ActiveEventLoop, EventLoopWindow, OwnedDisplayHandle};
 use crate::monitor::MonitorHandle;
+use crate::toplevel::Toplevel;
 use crate::window_request::WindowRequest;
 use crate::window_state::SharedWindowState;
 
@@ -47,28 +48,41 @@ impl Window {
             .and_then(|attrs| attrs.cast::<WindowAttributesGtk>().ok())
             .unwrap_or_default();
 
-        let window = gtk::ApplicationWindow::builder()
-            .application(&event_loop.app)
-            .deletable(attributes.enabled_buttons.contains(WindowButtons::CLOSE))
-            .title(attributes.title)
-            .visible(attributes.visible)
-            .decorated(attributes.decorations)
-            .can_focus(attributes.active && pl_attributes.focusable)
-            .build();
+        let window = if pl_attributes.gtk_toplevel {
+            Self::new_gtk(event_loop, attributes, *pl_attributes)
+        } else {
+            Self::new_gdk(event_loop, attributes, *pl_attributes)
+        };
 
+        Ok(window)
+    }
+
+    fn new_gtk(
+        event_loop: &ActiveEventLoop,
+        attributes: WindowAttributes,
+        pl_attributes: WindowAttributesGtk,
+    ) -> Self {
+        let window = gtk::ApplicationWindow::builder().application(&event_loop.app).build();
+
+        // Handle attributes.surface_size
         let scale_factor = window.scale_factor();
-
         let (width, height) = attributes
             .surface_size
             .map_or((800, 600), |size| size.to_logical::<i32>(scale_factor as _).into());
         window.set_default_size(width, height);
 
+        // Handle attributes.min_surface_size
         if let Some(min_surface_size) = attributes.min_surface_size {
             let (min_width, min_height) =
                 min_surface_size.to_logical::<i32>(scale_factor as _).into();
             window.set_size_request(min_width, min_height);
         }
 
+        // NOTE: GTK4 does not support attributes.max_surface_size
+        // NOTE: GTK4 does not support attributes.surface_resize_increments
+        // NOTE: GTK4 does not support attributes.position
+
+        // Handle attributes.resizable and attributes.maximized
         if attributes.maximized {
             struct Process {
                 window: gtk::ApplicationWindow,
@@ -107,10 +121,28 @@ impl Window {
             window.set_resizable(attributes.resizable);
         }
 
-        // TODO: handle attributes.icon
-        // TODO: handle attributes.position
-        // TODO: handle attributes.window_level
+        // Handle attributes.enabled_buttons
+        // NOTE: GTK4 does not support disabling minimize and maximize buttons
+        window.set_deletable(attributes.enabled_buttons.contains(WindowButtons::CLOSE));
 
+        // Handle attributes.title
+        window.set_title(Some(&attributes.title));
+
+        // NOTE: attributes.maximized is already handled above
+
+        // Handle attributes.visible
+        window.set_visible(attributes.visible);
+
+        // TODO: Handle attributes.transparent
+
+        // NOTE: GTK4 does not support attributes.blur
+
+        // Handle attributes.decorations
+        window.set_decorated(attributes.decorations);
+
+        // TODO: Handle attributes.window_icon
+
+        // Handle attributes.preferred_theme
         if let Some(settings) = gtk::Settings::default()
             && let Some(preferred_theme) = attributes.preferred_theme
         {
@@ -135,12 +167,23 @@ impl Window {
             }
         }
 
+        // NOTE: GTK4 does not support attributes.content_protected
+        // NOTE: GTK4 does not support attributes.window_level
+        // NOTE: GTK4 does not support attributes.active
+
+        // TODO: Handle attributes.cursor
+
+        // NOTE: GTK4 does not support attributes.parent_window; it does have
+        // transient_for, but wants a gtk::Window rather than some x11/wayland
+        // raw window handle
+
+        // Handle attributes.fullscreen
         if let Some(ref fullscreen) = attributes.fullscreen {
             match fullscreen {
                 Fullscreen::Borderless(Some(m)) => {
-                    let display = gtk::prelude::RootExt::display(&window);
                     if let Some(target) = m.cast_ref::<MonitorHandle>() {
-                        let found = display
+                        let found = event_loop
+                            .display
                             .monitors()
                             .iter::<gdk::Monitor>()
                             .any(|res| res.ok().map_or(false, |m| m == target.0));
@@ -160,22 +203,13 @@ impl Window {
             }
         }
 
-        let drawing_area = gtk::DrawingArea::new();
-        drawing_area.set_hexpand(true);
-        drawing_area.set_vexpand(true);
-        window.set_child(Some(&drawing_area));
-
-        // TODO: handle attributes.cursor
-
-        if attributes.visible {
-            window.present();
-        }
+        // Handle pl_attributes.focusable
+        window.set_can_focus(pl_attributes.focusable);
 
         let id = WindowId::from_raw(window.id() as _);
-        let state = SharedWindowState::new(&window, &drawing_area);
+        let state = SharedWindowState::new_gtk(&window);
         event_loop.windows.borrow_mut().insert(id, EventLoopWindow {
-            window: window.clone(),
-            drawing_area,
+            toplevel: Toplevel::Gtk(window.clone()),
             state: state.clone(),
         });
 
@@ -188,11 +222,15 @@ impl Window {
         }
         event_loop.context.wakeup();
 
+        if attributes.visible {
+            window.present();
+        }
+
         let raw = window.surface().map_or(OwnedWindowHandle::Unavailable, |surface| {
             OwnedWindowHandle::new(&surface, event_loop.backend())
         });
 
-        Ok(Self {
+        Self {
             id,
             raw,
             state,
@@ -200,7 +238,142 @@ impl Window {
             handle: event_loop.handle.clone(),
             redraw_tx: event_loop.redraw_tx.clone(),
             window_requests_tx: event_loop.window_requests_tx.clone(),
-        })
+        }
+    }
+
+    fn new_gdk(
+        event_loop: &ActiveEventLoop,
+        attributes: WindowAttributes,
+        pl_attributes: WindowAttributesGtk,
+    ) -> Self {
+        let surface = gdk::Surface::new_toplevel(&event_loop.display);
+        let toplevel = surface
+            .clone()
+            .dynamic_cast::<gdk::Toplevel>()
+            .expect("Cannot cast toplevel surface to gdk::Toplevel");
+        let toplevel_layout = gdk::ToplevelLayout::new();
+
+        // Handle attributes.surface_size and attributes.min_surface_size
+        let scale_factor = toplevel.scale_factor();
+        let surface_size = attributes
+            .surface_size
+            .map_or((800, 600), |size| size.to_logical::<i32>(scale_factor as _).into());
+        let min_surface_size: Option<(i32, i32)> = attributes
+            .min_surface_size
+            .map(|size| size.to_logical::<i32>(scale_factor as _).into());
+
+        toplevel.connect_compute_size(move |toplevel, toplevel_size| {
+            let scale_factor = toplevel.scale_factor();
+            tracing::info!("Compute size with scale factor: {scale_factor}");
+
+            toplevel_size.set_size(surface_size.0, surface_size.1);
+            tracing::info!("Requested size: {surface_size:?}");
+
+            if let Some(min_surface_size) = min_surface_size {
+                toplevel_size.set_min_size(min_surface_size.0, min_surface_size.1);
+                tracing::info!("Requested min size: {min_surface_size:?}");
+            }
+        });
+
+        // NOTE: GDK4 does not support attributes.max_surface_size
+        // NOTE: GDK4 does not support attributes.surface_resize_increments
+        // NOTE: GDK4 does not support attributes.position
+
+        // Handle attributes.resizable
+        toplevel_layout.set_resizable(attributes.resizable);
+
+        // Handle attributes.enabled_buttons
+        // NOTE: GDK4 does not support disabling minimize and maximize buttons
+        toplevel.set_deletable(attributes.enabled_buttons.contains(WindowButtons::CLOSE));
+
+        // Handle attributes.title
+        toplevel.set_title(&attributes.title);
+
+        // Handle attributes.maximized
+        toplevel_layout.set_maximized(attributes.maximized);
+
+        // TODO: Handle attributes.visible
+
+        // TODO: Handle attributes.transparent
+
+        // NOTE: GDK4 does not support attributes.blur
+
+        // Handle attributes.decorations
+        toplevel.set_decorated(attributes.decorations);
+
+        // TODO: Handle attributes.window_icon
+
+        // TODO: Handle attributes.preferred_theme
+
+        // NOTE: GDK4 does not support attributes.content_protected
+        // NOTE: GDK4 does not support attributes.window_level
+        // NOTE: GDK4 does not support attributes.active
+
+        // TODO: Handle attributes.cursor
+
+        // NOTE: GDK4 does not support attributes.parent_window; it does have
+        // transient_for, but wants a gdk::Surface rather than some x11/wayland
+        // raw window handle
+
+        // Handle attributes.fullscreen
+        if let Some(ref fullscreen) = attributes.fullscreen {
+            match fullscreen {
+                Fullscreen::Borderless(Some(m)) => {
+                    if let Some(target) = m.cast_ref::<MonitorHandle>() {
+                        let found = event_loop
+                            .display
+                            .monitors()
+                            .iter::<gdk::Monitor>()
+                            .any(|res| res.ok().map_or(false, |m| m == target.0));
+                        if found {
+                            toplevel_layout.set_fullscreen(true, Some(&target.0));
+                        } else {
+                            tracing::warn!("Cannot find the monitor specified for fullscreen");
+                        }
+                    }
+                },
+                Fullscreen::Borderless(None) => {
+                    toplevel_layout.set_fullscreen(true, None::<&gdk::Monitor>);
+                },
+                Fullscreen::Exclusive(..) => {
+                    tracing::warn!("GDK backend does not support exclusive fullscreen mode");
+                },
+            }
+        }
+
+        // TODO: Handle pl_attributes.focusable
+
+        let id = WindowId::from_raw(surface.as_ptr() as _);
+        let state = SharedWindowState::new_gdk(&toplevel);
+        event_loop.windows.borrow_mut().insert(id, EventLoopWindow {
+            toplevel: Toplevel::Gdk(toplevel.clone(), toplevel_layout.clone(), surface.clone()),
+            state: state.clone(),
+        });
+
+        if let Err(e) =
+            event_loop.window_requests_tx.send_blocking((id, WindowRequest::WireUpEvents {
+                fullscreen: attributes.fullscreen.is_some(),
+            }))
+        {
+            tracing::warn!("Failed to send WindowRequest::WireUpEvents: {e}");
+        }
+        event_loop.context.wakeup();
+
+        if attributes.visible {
+            toplevel.present(&toplevel_layout);
+        }
+
+        let raw = OwnedWindowHandle::new(&surface, event_loop.backend());
+
+        Self {
+            id,
+            raw,
+            state,
+            context: event_loop.context.clone(),
+            handle: event_loop.handle.clone(),
+            redraw_tx: event_loop.redraw_tx.clone(),
+            window_requests_tx: event_loop.window_requests_tx.clone(),
+        }
     }
 
     pub(crate) fn set_focusable(&self, focusable: bool) {
@@ -217,19 +390,6 @@ impl Window {
             .send_blocking((self.id, WindowRequest::WithGtkWindow(Box::new(f))))
         {
             tracing::warn!("Failed to send WindowRequest::WithGtkWindow: {e}");
-        }
-        self.context.wakeup();
-    }
-
-    pub(crate) fn with_gtk_drawing_area<F>(&self, f: F)
-    where
-        F: FnOnce(&gtk::DrawingArea) + Send + 'static,
-    {
-        if let Err(e) = self
-            .window_requests_tx
-            .send_blocking((self.id, WindowRequest::WithGtkDrawingArea(Box::new(f))))
-        {
-            tracing::warn!("Failed to send WindowRequest::WithGtkDrawingArea: {e}");
         }
         self.context.wakeup();
     }
@@ -323,7 +483,7 @@ impl CoreWindow for Window {
         None // Not supported by GTK
     }
 
-    fn set_surface_resize_increments(&self, increments: Option<Size>) {
+    fn set_surface_resize_increments(&self, _increments: Option<Size>) {
         tracing::warn!("GTK does not support setting surface resize increments");
     }
 

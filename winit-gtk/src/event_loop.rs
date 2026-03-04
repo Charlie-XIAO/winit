@@ -24,6 +24,7 @@ use winit_core::monitor::MonitorHandle as CoreMonitorHandle;
 use winit_core::window::{Theme, Window as CoreWindow, WindowAttributes, WindowId};
 
 use crate::monitor::MonitorHandle;
+use crate::toplevel::Toplevel;
 use crate::window::Window;
 use crate::window_request::{WindowRequest, handle_window_requests};
 use crate::window_state::SharedWindowState;
@@ -80,8 +81,7 @@ impl Default for PlatformSpecificEventLoopAttributes {
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventLoopWindow {
-    pub(crate) window: gtk::ApplicationWindow,
-    pub(crate) drawing_area: gtk::DrawingArea,
+    pub(crate) toplevel: Toplevel,
     pub(crate) state: SharedWindowState,
 }
 

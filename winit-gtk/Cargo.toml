@@ -26,9 +26,9 @@ tracing.workspace = true
 winit-core.workspace = true
 
 # Platform-specific
-gtk = { package = "gtk4", version = "0.10" }
-gdk-x11-sys = { package = "gdk4-x11-sys", version = "0.10", optional = true }
-gdk-wayland-sys = { package = "gdk4-wayland-sys", version = "0.10", optional = true }
+gtk = { package = "gtk4", version = "0.11" }
+gdk-x11-sys = { package = "gdk4-x11-sys", version = "0.11", optional = true }
+gdk-wayland-sys = { package = "gdk4-wayland-sys", version = "0.11", optional = true }
 crossbeam-channel = "0.5"
 async-channel = "2.5"
 winit-common = { workspace = true, features = ["free-unix"] }

@@ -1,10 +1,11 @@
 use dpi::LogicalSize;
-use gtk::glib;
 use gtk::prelude::*;
+use gtk::{gdk, glib};
 use winit_core::event::WindowEvent;
 use winit_core::window::WindowId;
 
 use crate::event_loop::{EventLoopWindow, EventLoopWindows, QueuedEvent};
+use crate::toplevel::Toplevel;
 use crate::window_state::SharedWindowState;
 
 #[non_exhaustive]
@@ -14,7 +15,6 @@ pub enum WindowRequest {
     Resizable(bool),
     Destroy,
     WithGtkWindow(Box<dyn FnOnce(&gtk::ApplicationWindow) + Send + 'static>),
-    WithGtkDrawingArea(Box<dyn FnOnce(&gtk::DrawingArea) + Send + 'static>),
     WireUpEvents { fullscreen: bool },
 }
 
@@ -27,43 +27,54 @@ pub async fn handle_window_requests(
     while let Ok((id, request)) = window_requests_rx.recv().await {
         if matches!(request, WindowRequest::Destroy) {
             if let Some(window) = windows.borrow_mut().remove(&id) {
-                window.window.destroy();
+                window.toplevel.destroy();
             }
             continue;
         }
 
         if let Some(window) = windows.borrow().get(&id).cloned() {
-            let EventLoopWindow { window, drawing_area, state } = window;
+            let EventLoopWindow { toplevel, state } = window;
 
             match request {
                 WindowRequest::Title(title) => {
-                    window.set_title(Some(&title));
+                    toplevel.set_title(&title);
                 },
                 WindowRequest::Visible(visible) => {
-                    window.set_visible(visible);
-                    if visible {
-                        window.present();
-                    }
+                    toplevel.set_visible(visible);
                 },
                 WindowRequest::Resizable(resizable) => {
-                    window.set_resizable(resizable);
+                    toplevel.set_resizable(resizable);
                 },
-                WindowRequest::WithGtkWindow(f) => {
-                    f(&window);
+                WindowRequest::WithGtkWindow(f) => match toplevel {
+                    Toplevel::Gtk(w) => f(&w),
+                    Toplevel::Gdk(..) => {
+                        tracing::warn!(
+                            "No GTK window available when gtk_toplevel is false; ignoring \
+                             WithGtkWindow request"
+                        );
+                    },
                 },
-                WindowRequest::WithGtkDrawingArea(f) => {
-                    f(&drawing_area);
-                },
-                WindowRequest::WireUpEvents { fullscreen } => {
-                    handle_wire_up_events(
-                        id,
-                        &window,
-                        &drawing_area,
-                        state,
-                        events_tx.clone(),
-                        redraw_tx.clone(),
-                        fullscreen,
-                    );
+                WindowRequest::WireUpEvents { fullscreen } => match toplevel {
+                    Toplevel::Gtk(w) => {
+                        handle_wire_up_events_gtk(
+                            id,
+                            &w,
+                            state,
+                            events_tx.clone(),
+                            redraw_tx.clone(),
+                            fullscreen,
+                        );
+                    },
+                    Toplevel::Gdk(s, ..) => {
+                        handle_wire_up_events_gdk(
+                            id,
+                            &s,
+                            state,
+                            events_tx.clone(),
+                            redraw_tx.clone(),
+                            fullscreen,
+                        );
+                    },
                 },
                 _ => unreachable!(),
             }
@@ -71,15 +82,15 @@ pub async fn handle_window_requests(
     }
 }
 
-fn handle_wire_up_events(
+fn handle_wire_up_events_gtk(
     id: WindowId,
     window: &gtk::ApplicationWindow,
-    drawing_area: &gtk::DrawingArea,
     state: SharedWindowState,
     events_tx: crossbeam_channel::Sender<QueuedEvent>,
     redraw_tx: crossbeam_channel::Sender<WindowId>,
     fullscreen: bool,
 ) {
+    let _ = redraw_tx;
     let _ = fullscreen;
 
     // Handle when the scale factor of the window changes
@@ -112,29 +123,22 @@ fn handle_wire_up_events(
 
     // Handle when the window is resized
     {
-        let state = state.clone();
-        if let Some(surface) = window.surface() {
-            surface.connect_layout(move |_, width, height| {
-                state.update_outer_size(width, height);
-            });
-        }
-    }
-
-    // Handle when the drawing area is resized
-    {
         let tx = events_tx.clone();
         let state = state.clone();
-        drawing_area.connect_resize(move |drawing_area, width, height| {
-            state.update_surface_size(width, height);
+        if let Some(surface) = window.surface() {
+            surface.connect_layout(move |surface, width, height| {
+                state.update_surface_size(width, height);
+                state.update_outer_size(width, height);
 
-            let scale_factor = drawing_area.scale_factor() as f64;
-            let size = LogicalSize::new(width, height).to_physical(scale_factor);
-            if let Err(e) =
-                tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
-            {
-                tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
-            }
-        });
+                let scale_factor = surface.scale_factor() as _;
+                let size = LogicalSize::new(width, height).to_physical(scale_factor);
+                if let Err(e) =
+                    tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
+                {
+                    tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
+                }
+            });
+        }
     }
 
     // Handle when the keyboard focus enters or leaves the window
@@ -177,5 +181,42 @@ fn handle_wire_up_events(
     // Handle when the window needs to be redrawn
     {
         // TODO
+    }
+}
+
+fn handle_wire_up_events_gdk(
+    id: WindowId,
+    toplevel: &gdk::Toplevel,
+    state: SharedWindowState,
+    events_tx: crossbeam_channel::Sender<QueuedEvent>,
+    redraw_tx: crossbeam_channel::Sender<WindowId>,
+    fullscreen: bool,
+) {
+    let _ = fullscreen;
+
+    // Handle when the scale factor of the window changes
+    {
+        let state = state.clone();
+        toplevel.connect_scale_factor_notify(move |w| {
+            state.update_scale_factor(w.scale_factor() as _);
+        });
+    }
+
+    // Handle when the window is resized
+    {
+        let tx = events_tx.clone();
+        let state = state.clone();
+        toplevel.connect_layout(move |surface, width, height| {
+            state.update_surface_size(width, height);
+            state.update_outer_size(width, height);
+
+            let scale_factor = surface.scale_factor() as _;
+            let size = LogicalSize::new(width, height).to_physical(scale_factor);
+            if let Err(e) =
+                tx.send(QueuedEvent::Window { id, event: WindowEvent::SurfaceResized(size) })
+            {
+                tracing::warn!("Failed to send WindowEvent::SurfaceResized: {e}");
+            }
+        });
     }
 }
