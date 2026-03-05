@@ -70,6 +70,7 @@ windows-sys = "0.61"
 bytemuck = { version = "1.13.1", default-features = false }
 calloop = "0.14.3"
 foldhash = { version = "0.2.0", default-features = false, features = ["std"] }
+glib = "0.22.2"
 libc = "0.2.64"
 memmap2 = "0.9.0"
 percent-encoding = "2.0"

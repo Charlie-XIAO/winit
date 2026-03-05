@@ -16,6 +16,7 @@ csd-adwaita-crossfont = ["sctk-adwaita", "sctk-adwaita/crossfont"]
 csd-adwaita-notitle = ["sctk-adwaita"]
 csd-adwaita-notitlebar = ["csd-adwaita-notitle"]
 dlopen = ["wayland-backend/dlopen"]
+glib = ["dep:glib"]
 serde = ["dep:serde", "bitflags/serde", "smol_str/serde", "dpi/serde"]
 
 [dependencies]
@@ -31,6 +32,7 @@ winit-core.workspace = true
 # Platform-specific
 calloop.workspace = true
 foldhash.workspace = true
+glib = { workspace = true, optional = true }
 libc.workspace = true
 memmap2.workspace = true
 rustix = { workspace = true, features = ["std", "system", "thread", "process", "event", "pipe"] }

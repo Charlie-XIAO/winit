@@ -34,6 +34,9 @@ use crate::types::cursor::WaylandCustomCursor;
 mod proxy;
 pub mod sink;
 
+#[cfg(feature = "glib")]
+mod glib_bridge;
+
 use proxy::EventLoopProxy;
 use sink::EventSink;
 pub use winit_core::event_loop::EventLoopProxy as CoreEventLoopProxy;
@@ -74,6 +77,9 @@ pub struct EventLoop {
     // XXX drop after everything else, just to be safe.
     /// Calloop's event loop.
     event_loop: calloop::EventLoop<'static, WinitState>,
+
+    #[cfg(feature = "glib")]
+    glib: glib_bridge::GlibBridge<WinitState>,
 
     pump_event_notifier: Option<PumpEventNotifier>,
 }
@@ -163,6 +169,8 @@ impl EventLoop {
             wayland_dispatcher,
             event_loop,
             active_event_loop,
+            #[cfg(feature = "glib")]
+            glib: glib_bridge::GlibBridge::default(),
             pump_event_notifier: None,
         };
 
@@ -258,6 +266,22 @@ impl EventLoop {
                 min_timeout(control_flow_timeout, timeout)
             };
 
+            #[cfg(feature = "glib")]
+            {
+                if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                    tracing::warn!("Failed to refresh glib: {e}");
+                }
+                timeout = min_timeout(self.glib.timeout(), timeout);
+
+                if self.glib.ready_now() {
+                    self.glib.drain();
+                    if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                        tracing::warn!("Failed to refresh glib after drain: {e}");
+                    }
+                    timeout = min_timeout(self.glib.timeout(), timeout);
+                }
+            }
+
             // NOTE Ideally we should flush as the last thing we do before polling
             // to wait for events, and this should be done by the calloop
             // WaylandSource but we currently need to flush writes manually.
@@ -281,6 +305,9 @@ impl EventLoop {
                 self.set_exit_code(exit_code);
                 return;
             }
+
+            #[cfg(feature = "glib")]
+            self.glib.drain();
 
             // NB: `StartCause::Init` is handled as a special case and doesn't need
             // to be considered here
