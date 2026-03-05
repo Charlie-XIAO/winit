@@ -27,6 +27,7 @@ impl TryFrom<RawFd> for FileId {
     }
 }
 
+/// Bridge a thread-default glib main context into a calloop-driven event loop.
 pub struct GlibBridge<State> {
     ctx: glib::MainContext,
     regs: HashMap<RawFd, (RegistrationToken, i16, FileId)>,
@@ -75,6 +76,11 @@ fn interest_from_events(events: i16) -> Interest {
 }
 
 impl<State> GlibBridge<State> {
+    /// Refresh glib's requested poll set and register them into calloop.
+    ///
+    /// This should be called before blocking in the host event loop. Note that
+    /// this does **not** run glib callbacks; [`Self::drain`] must be called to
+    /// progress glib work.
     pub fn refresh(&mut self, handle: &LoopHandle<'_, State>) -> io::Result<()> {
         let _guard = self.ctx.acquire().map_err(|e| {
             self.timeout_ms = -1;
@@ -186,16 +192,21 @@ impl<State> GlibBridge<State> {
         Ok(())
     }
 
+    /// Return glib's requested timeout.
     pub fn timeout(&self) -> Option<Duration> {
         if self.timeout_ms < 0 { None } else { Some(Duration::from_millis(self.timeout_ms as _)) }
     }
 
+    /// Whether glib reported immediate work ready in the last [`refresh`].
+    ///
+    /// [`refresh`]: Self::refresh
     pub fn ready_now(&self) -> bool {
         self.ready_now
     }
 
+    /// Progress glib work non-blockingly until no further work is ready.
     pub fn drain(&mut self) {
-        while self.ctx.iteration(false) { /* Non-blocking */ }
+        while self.ctx.iteration(false) {}
     }
 }
 
