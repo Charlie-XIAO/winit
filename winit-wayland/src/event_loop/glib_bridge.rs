@@ -148,26 +148,24 @@ impl<State> GlibBridge<State> {
     }
 
     pub fn drain(&mut self) {
-        loop {
-            let dispatched = self.ctx.iteration(false);
-            if !dispatched {
-                break;
-            }
-        }
+        while self.ctx.iteration(false) {}
     }
 }
 
 impl<State> fmt::Debug for GlibBridge<State> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let pollfds = f
-            .debug_list()
-            .entries(self.pollfds.iter().map(|p| (p.fd, p.events, p.revents)))
-            .finish();
+        struct PollFdList<'a>(&'a [glib::ffi::GPollFD]);
+
+        impl fmt::Debug for PollFdList<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_list().entries(self.0.iter().map(|p| (p.fd, p.events, p.revents))).finish()
+            }
+        }
 
         f.debug_struct("GlibBridge")
             .field("ctx", &self.ctx)
             .field("regs", &self.regs)
-            .field("pollfds", &pollfds)
+            .field("pollfds", &PollFdList(&self.pollfds))
             .field("timeout_ms", &self.timeout_ms)
             .field("ready_now", &self.ready_now)
             .finish()
