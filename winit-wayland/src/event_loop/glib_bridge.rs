@@ -8,13 +8,31 @@ use calloop::generic::Generic;
 use calloop::{Interest, LoopHandle, Mode, PostAction, RegistrationToken};
 use glib::translate::ToGlibPtr;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileId {
+    dev: libc::dev_t,
+    ino: libc::ino_t,
+}
+
+impl TryFrom<RawFd> for FileId {
+    type Error = io::Error;
+
+    fn try_from(fd: RawFd) -> Result<Self, Self::Error> {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let stat = unsafe { stat.assume_init() };
+        Ok(Self { dev: stat.st_dev, ino: stat.st_ino })
+    }
+}
+
 pub struct GlibBridge<State> {
     ctx: glib::MainContext,
-    regs: HashMap<RawFd, (RegistrationToken, i16)>,
+    regs: HashMap<RawFd, (RegistrationToken, i16, FileId)>,
     pollfds: Vec<glib::ffi::GPollFD>,
     timeout_ms: i32,
     ready_now: bool,
-    reinstall_all: bool,
     _phantom: std::marker::PhantomData<State>,
 }
 
@@ -26,10 +44,34 @@ impl<State> Default for GlibBridge<State> {
             pollfds: Vec::new(),
             timeout_ms: -1,
             ready_now: false,
-            reinstall_all: false,
             _phantom: std::marker::PhantomData,
         }
     }
+}
+
+fn interest_from_events(events: i16) -> Interest {
+    let mut interest = Interest::EMPTY;
+
+    if (events & (libc::POLLIN | libc::POLLPRI)) != 0 {
+        interest.readable = true;
+    }
+    if (events & libc::POLLOUT) != 0 {
+        interest.writable = true;
+    }
+
+    // Treat error and hangup conditions as readable, so we can wake and
+    // let glib handle them
+    if (events & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL)) != 0 {
+        interest.readable = true;
+    }
+
+    // Defensive: if glib every returns an empty mask, still register
+    // something so the source is not "dead" in calloop
+    if !interest.readable && !interest.writable {
+        interest.readable = true;
+    }
+
+    interest
 }
 
 impl<State> GlibBridge<State> {
@@ -80,49 +122,44 @@ impl<State> GlibBridge<State> {
             return Err(io::Error::new(io::ErrorKind::Other, "g_main_context_query failed (2)"));
         }
 
-        let mut keep: HashMap<RawFd, i16> = HashMap::new();
+        // Snapshot glib's currently-requested poll set
+        let mut keep = HashMap::new();
         for p in &self.pollfds {
             if p.fd >= 0 {
-                keep.insert(p.fd as _, p.events as _);
+                let fd = p.fd as RawFd;
+                let id: FileId = fd.try_into()?;
+                keep.insert(fd, (p.events as i16, id));
             }
         }
 
+        // Remove calloop sources for fds that glib no longer needs
         let to_remove: Vec<_> =
             self.regs.keys().copied().filter(|fd| !keep.contains_key(fd)).collect();
         for fd in to_remove {
-            if let Some((token, _)) = self.regs.remove(&fd) {
-                let _ = handle.remove(token);
+            if let Some((token, ..)) = self.regs.remove(&fd) {
+                handle.remove(token);
             }
         }
 
-        for (&fd, &events) in &keep {
-            let needs_reinstall = self.reinstall_all
-                || match self.regs.get(&fd) {
-                    None => true,
-                    Some((_, old_events)) => *old_events != events,
-                };
+        for (&fd, &(events, id)) in &keep {
+            // Reinstall if fd is new, or events changed, or file identity
+            // changed (e.g., due to close and fd reuse)
+            let needs_reinstall = match self.regs.get(&fd) {
+                None => true,
+                Some((_, old_events, old_id)) => *old_events != events || *old_id != id,
+            };
             if !needs_reinstall {
                 continue;
             }
 
-            if let Some((old_token, _)) = self.regs.remove(&fd) {
-                let _ = handle.remove(old_token);
+            if let Some((old_token, ..)) = self.regs.remove(&fd) {
+                handle.remove(old_token);
             }
 
-            let mut interest = Interest::EMPTY;
-            if (events & (libc::POLLIN | libc::POLLPRI)) != 0 {
-                interest.readable = true;
-            }
-            if (events & libc::POLLOUT) != 0 {
-                interest.writable = true;
-            }
-            if (events & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL)) != 0 {
-                interest.readable = true;
-            }
-            if !interest.readable && !interest.writable {
-                interest.readable = true;
-            }
+            let interest = interest_from_events(events);
 
+            // We dup() the fd so the calloop generic source owns a stable file
+            // descriptor even if glib closes/replaces its original fd later
             let duped_fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
             if duped_fd < 0 {
                 return Err(io::Error::last_os_error());
@@ -132,7 +169,10 @@ impl<State> GlibBridge<State> {
             let source = Generic::new(owned_fd, interest, Mode::Level);
             let token = handle
                 .insert_source(source, |_, _, _| {
-                    Ok(PostAction::Continue) // No direct action, wakeup is enough
+                    // This source only needs to wake up the calloop event loop
+                    // and does not directly dispatch glib work; glib work is
+                    // separately progressed via drain()
+                    Ok(PostAction::Continue)
                 })
                 .map_err(|e| {
                     io::Error::new(
@@ -140,10 +180,9 @@ impl<State> GlibBridge<State> {
                         format!("Failed to insert glib event source: {e}"),
                     )
                 })?;
-            self.regs.insert(fd, (token, events));
+            self.regs.insert(fd, (token, events, id));
         }
 
-        self.reinstall_all = false;
         Ok(())
     }
 
@@ -156,12 +195,7 @@ impl<State> GlibBridge<State> {
     }
 
     pub fn drain(&mut self) {
-        while self.ctx.iteration(false) {
-            // If glib actually dispatched anything, it could have added/removed
-            // sources; next refresh should reinstall watchers even if numeric
-            // fd and mask do not change
-            self.reinstall_all = true;
-        }
+        while self.ctx.iteration(false) { /* Non-blocking */ }
     }
 }
 
