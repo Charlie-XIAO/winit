@@ -16,7 +16,7 @@ check:
     --features winit-wayland/glib
 
 run:
-  cargo run --example window
+  cargo run --example window --features glib
 
 zip:
   zip -r .archive/winit.zip \

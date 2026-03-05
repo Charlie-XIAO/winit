@@ -43,6 +43,7 @@ default = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]
 
 android-game-activity = ["winit-android/game-activity"]
 android-native-activity = ["winit-android/native-activity"]
+glib = ["winit-wayland?/glib", "winit-x11?/glib"]
 mint = ["dpi/mint"]
 serde = [
     "dep:serde",
