@@ -14,6 +14,7 @@ pub struct GlibBridge<State> {
     pollfds: Vec<glib::ffi::GPollFD>,
     timeout_ms: i32,
     ready_now: bool,
+    reinstall_all: bool,
     _phantom: std::marker::PhantomData<State>,
 }
 
@@ -25,6 +26,7 @@ impl<State> Default for GlibBridge<State> {
             pollfds: Vec::new(),
             timeout_ms: -1,
             ready_now: false,
+            reinstall_all: false,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -32,15 +34,15 @@ impl<State> Default for GlibBridge<State> {
 
 impl<State> GlibBridge<State> {
     pub fn refresh(&mut self, handle: &LoopHandle<'_, State>) -> io::Result<()> {
-        let _guard = match self.ctx.acquire() {
-            Ok(guard) => guard,
-            Err(e) => {
-                self.timeout_ms = -1;
-                self.ready_now = false;
-                tracing::warn!("Failed to acquire ownership of glib main context: {e}");
-                return Ok(());
-            },
-        };
+        let _guard = self.ctx.acquire().map_err(|e| {
+            self.timeout_ms = -1;
+            self.ready_now = false;
+
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to acquire ownership of glib main context: {e}"),
+            )
+        })?;
 
         let (ready_now, priority) = self.ctx.prepare();
         self.ready_now = ready_now;
@@ -94,10 +96,11 @@ impl<State> GlibBridge<State> {
         }
 
         for (&fd, &events) in &keep {
-            let needs_reinstall = match self.regs.get(&fd) {
-                None => true,
-                Some((_, old_events)) => *old_events != events,
-            };
+            let needs_reinstall = self.reinstall_all
+                || match self.regs.get(&fd) {
+                    None => true,
+                    Some((_, old_events)) => *old_events != events,
+                };
             if !needs_reinstall {
                 continue;
             }
@@ -140,6 +143,7 @@ impl<State> GlibBridge<State> {
             self.regs.insert(fd, (token, events));
         }
 
+        self.reinstall_all = false;
         Ok(())
     }
 
@@ -152,7 +156,12 @@ impl<State> GlibBridge<State> {
     }
 
     pub fn drain(&mut self) {
-        while self.ctx.iteration(false) {}
+        while self.ctx.iteration(false) {
+            // If glib actually dispatched anything, it could have added/removed
+            // sources; next refresh should reinstall watchers even if numeric
+            // fd and mask do not change
+            self.reinstall_all = true;
+        }
     }
 }
 

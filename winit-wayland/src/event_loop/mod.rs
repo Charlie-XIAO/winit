@@ -266,6 +266,17 @@ impl EventLoop {
                 min_timeout(control_flow_timeout, timeout)
             };
 
+            // NOTE Ideally we should flush as the last thing we do before polling
+            // to wait for events, and this should be done by the calloop
+            // WaylandSource but we currently need to flush writes manually.
+            //
+            // Checking for flush error is essential to perform an exit with error, since
+            // once we have a protocol error, we could get stuck retrying...
+            if self.handle.connection.flush().is_err() {
+                self.set_exit_code(1);
+                return;
+            }
+
             #[cfg(feature = "glib")]
             {
                 if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
@@ -280,17 +291,6 @@ impl EventLoop {
                     }
                     timeout = min_timeout(self.glib.timeout(), timeout);
                 }
-            }
-
-            // NOTE Ideally we should flush as the last thing we do before polling
-            // to wait for events, and this should be done by the calloop
-            // WaylandSource but we currently need to flush writes manually.
-            //
-            // Checking for flush error is essential to perform an exit with error, since
-            // once we have a protocol error, we could get stuck retrying...
-            if self.handle.connection.flush().is_err() {
-                self.set_exit_code(1);
-                return;
             }
 
             if let Err(error) = self.loop_dispatch(timeout) {

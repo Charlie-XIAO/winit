@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let webview = WebView::new();
             webview.set_hexpand(true);
             webview.set_vexpand(true);
-            webview.load_uri("https://crates.io/");
+            webview.load_uri("https://crates.io/crates/winit");
 
             let vbox = gtk::Box::new(gtk::Orientation::Vertical, 6);
             vbox.set_hexpand(true);
