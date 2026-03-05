@@ -75,7 +75,7 @@ impl<State> GlibBridge<State> {
             )
         };
         if got < 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "g_main_context_query failed"));
+            return Err(io::Error::new(io::ErrorKind::Other, "g_main_context_query failed (2)"));
         }
 
         let mut keep: HashMap<RawFd, i16> = HashMap::new();
@@ -102,18 +102,22 @@ impl<State> GlibBridge<State> {
                 continue;
             }
 
+            if let Some((old_token, _)) = self.regs.remove(&fd) {
+                let _ = handle.remove(old_token);
+            }
+
             let mut interest = Interest::EMPTY;
-            if events & libc::POLLIN != 0 {
+            if (events & (libc::POLLIN | libc::POLLPRI)) != 0 {
                 interest.readable = true;
             }
-            if events & libc::POLLOUT != 0 {
+            if (events & libc::POLLOUT) != 0 {
                 interest.writable = true;
             }
-            if events & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            if (events & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL)) != 0 {
                 interest.readable = true;
             }
             if !interest.readable && !interest.writable {
-                interest.readable = true; // Avoid dead source
+                interest.readable = true;
             }
 
             let duped_fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
@@ -124,8 +128,8 @@ impl<State> GlibBridge<State> {
             let owned_fd = unsafe { OwnedFd::from_raw_fd(duped_fd) };
             let source = Generic::new(owned_fd, interest, Mode::Level);
             let token = handle
-                .insert_source(source, move |_, _, _| {
-                    Ok(PostAction::Continue) // No direct action, wakup is enough
+                .insert_source(source, |_, _, _| {
+                    Ok(PostAction::Continue) // No direct action, wakeup is enough
                 })
                 .map_err(|e| {
                     io::Error::new(

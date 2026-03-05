@@ -15,8 +15,8 @@ check:
     --features winit-x11/glib \
     --features winit-wayland/glib
 
-run:
-  cargo run --example window --features glib
+run $WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS="1":
+  cargo run --example webkitgtk_multiwindow --features glib
 
 zip:
   zip -r .archive/winit.zip \
