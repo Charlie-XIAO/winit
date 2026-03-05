@@ -17,6 +17,8 @@ use rustix::pipe::{self, PipeFlags};
 use sctk::reexports::calloop_wayland_source::WaylandSource;
 use sctk::reexports::client::{Connection, QueueHandle, globals};
 use tracing::warn;
+#[cfg(feature = "glib")]
+use winit_common::glib_bridge::GlibBridge;
 use winit_core::application::ApplicationHandler;
 use winit_core::cursor::{CustomCursor as CoreCustomCursor, CustomCursorSource};
 use winit_core::error::{EventLoopError, NotSupportedError, OsError, RequestError};
@@ -33,9 +35,6 @@ use crate::types::cursor::WaylandCustomCursor;
 
 mod proxy;
 pub mod sink;
-
-#[cfg(feature = "glib")]
-mod glib_bridge;
 
 use proxy::EventLoopProxy;
 use sink::EventSink;
@@ -79,7 +78,7 @@ pub struct EventLoop {
     event_loop: calloop::EventLoop<'static, WinitState>,
 
     #[cfg(feature = "glib")]
-    glib: glib_bridge::GlibBridge<WinitState>,
+    glib: GlibBridge<WinitState>,
 
     pump_event_notifier: Option<PumpEventNotifier>,
 }
@@ -170,7 +169,7 @@ impl EventLoop {
             event_loop,
             active_event_loop,
             #[cfg(feature = "glib")]
-            glib: glib_bridge::GlibBridge::default(),
+            glib: GlibBridge::default(),
             pump_event_notifier: None,
         };
 
@@ -280,14 +279,14 @@ impl EventLoop {
             #[cfg(feature = "glib")]
             {
                 if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
-                    tracing::warn!("Failed to refresh glib: {e}");
+                    warn!("Failed to refresh glib: {e}");
                 }
                 timeout = min_timeout(self.glib.timeout(), timeout);
 
                 if self.glib.ready_now() {
                     self.glib.drain();
                     if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
-                        tracing::warn!("Failed to refresh glib after drain: {e}");
+                        warn!("Failed to refresh glib after drain: {e}");
                     }
                     timeout = min_timeout(self.glib.timeout(), timeout);
                 }

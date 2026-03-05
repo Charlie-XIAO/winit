@@ -16,6 +16,8 @@ use calloop::ping::Ping;
 use calloop::{EventLoop as Loop, Readiness};
 use libc::{LC_CTYPE, setlocale};
 use tracing::warn;
+#[cfg(feature = "glib")]
+use winit_common::glib_bridge::GlibBridge;
 use winit_common::xkb::Context;
 use winit_core::application::ApplicationHandler;
 use winit_core::cursor::{CustomCursor as CoreCustomCursor, CustomCursorSource};
@@ -193,6 +195,9 @@ pub struct EventLoop {
 
     /// The current state of the event loop.
     state: EventLoopState,
+
+    #[cfg(feature = "glib")]
+    glib: GlibBridge<EventLoopState>,
 }
 
 pub(crate) type ActivationItem = (WindowId, winit_core::event_loop::AsyncRequestSerial);
@@ -418,6 +423,8 @@ impl EventLoop {
             redraw_receiver: PeekableReceiver::from_recv(redraw_channel),
             activation_receiver: PeekableReceiver::from_recv(activation_token_channel),
             state: EventLoopState { x11_readiness: Readiness::EMPTY, proxy_wake_up: false },
+            #[cfg(feature = "glib")]
+            glib: GlibBridge::default(),
         };
 
         Ok(event_loop)
@@ -515,6 +522,22 @@ impl EventLoop {
             min_timeout(control_flow_timeout, timeout)
         };
 
+        #[cfg(feature = "glib")]
+        {
+            if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                warn!("Failed to refresh glib: {e}");
+            }
+            timeout = min_timeout(self.glib.timeout(), timeout);
+
+            if self.glib.ready_now() {
+                self.glib.drain();
+                if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                    warn!("Failed to refresh glib after drain: {e}");
+                }
+                timeout = min_timeout(self.glib.timeout(), timeout);
+            }
+        }
+
         self.state.x11_readiness = Readiness::EMPTY;
         if let Err(error) =
             self.event_loop.dispatch(timeout, &mut self.state).map_err(std::io::Error::from)
@@ -524,6 +547,9 @@ impl EventLoop {
             self.set_exit_code(exit_code);
             return;
         }
+
+        #[cfg(feature = "glib")]
+        self.glib.drain();
 
         // NB: `StartCause::Init` is handled as a special case and doesn't need
         // to be considered here
