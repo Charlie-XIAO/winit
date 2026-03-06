@@ -8,3 +8,4 @@ rls/
 # NPM package used to run ESLint.
 /src/platform_impl/web/script/node_modules
 /src/platform_impl/web/script/package-lock.json
+perf.data*

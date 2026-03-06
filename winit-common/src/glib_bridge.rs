@@ -130,7 +130,7 @@ impl<State> GlibBridge<State> {
 
         // Snapshot glib's currently-requested poll set
         let mut keep = HashMap::new();
-        for p in &self.pollfds {
+        for p in self.pollfds.iter().take(got as _) {
             if p.fd >= 0 {
                 let fd = p.fd as RawFd;
                 let id: FileId = fd.try_into()?;
@@ -187,6 +187,7 @@ impl<State> GlibBridge<State> {
                     )
                 })?;
             self.regs.insert(fd, (token, events, id));
+            tracing::debug!(fd, events, ?id, "register source");
         }
 
         Ok(())

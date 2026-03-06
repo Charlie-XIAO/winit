@@ -18,6 +18,11 @@ check:
 run $WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS="1":
   cargo run --example webkitgtk_multiwindow --features glib
 
+perf $WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS="1" RUSTFLAGS="-C debuginfo=1 -C force-frame-pointers=yes":
+  cargo build --example webkitgtk_multiwindow --features glib
+  perf record -F 99 -g --call-graph fp --all-user -- ./target/debug/examples/webkitgtk_multiwindow
+  perf report
+
 zip prefix:
   zip -r .archive/winit-{{prefix}}.zip \
     winit/ \
