@@ -20,6 +20,9 @@ xkb = ["dep:xkbcommon-dl", "dep:smol_str"]
 # CoreFoundation
 core-foundation = ["dep:objc2", "dep:objc2-core-foundation"]
 
+# GLib Bridge
+glib-bridge = ["dep:calloop", "dep:glib", "dep:libc"]
+
 [dependencies]
 smol_str = { workspace = true, optional = true }
 tracing.workspace = true
@@ -37,6 +40,11 @@ objc2-core-foundation = { workspace = true, optional = true, features = [
     "CFRunLoop",
     "CFString",
 ] }
+
+# GLib Bridge
+calloop = { workspace = true, optional = true }
+glib = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 
 [package.metadata.docs.rs]
 all-features = true

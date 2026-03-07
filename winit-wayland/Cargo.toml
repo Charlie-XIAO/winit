@@ -16,6 +16,7 @@ csd-adwaita-crossfont = ["sctk-adwaita", "sctk-adwaita/crossfont"]
 csd-adwaita-notitle = ["sctk-adwaita"]
 csd-adwaita-notitlebar = ["csd-adwaita-notitle"]
 dlopen = ["wayland-backend/dlopen"]
+glib = ["winit-common/glib-bridge"]
 serde = ["dep:serde", "bitflags/serde", "smol_str/serde", "dpi/serde"]
 
 [dependencies]

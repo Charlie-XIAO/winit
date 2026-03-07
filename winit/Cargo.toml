@@ -43,6 +43,7 @@ default = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]
 
 android-game-activity = ["winit-android/game-activity"]
 android-native-activity = ["winit-android/native-activity"]
+glib = ["winit-wayland?/glib", "winit-x11?/glib"]
 mint = ["dpi/mint"]
 serde = [
     "dep:serde",
@@ -101,6 +102,9 @@ rustix = { workspace = true, features = ["std", "thread"] }
 winit-common = { workspace = true, features = ["xkb"] }
 winit-wayland = { workspace = true, optional = true, default-features = false }
 winit-x11 = { workspace = true, optional = true }
+
+[target.'cfg(all(unix, not(any(target_os = "redox", target_family = "wasm", target_os = "android", target_vendor = "apple"))))'.dev-dependencies]
+gtk = { package = "gtk4", version = "0.10" }
 
 [target.'cfg(target_os = "redox")'.dependencies]
 winit-orbital.workspace = true

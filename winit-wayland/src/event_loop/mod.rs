@@ -17,6 +17,8 @@ use rustix::pipe::{self, PipeFlags};
 use sctk::reexports::calloop_wayland_source::WaylandSource;
 use sctk::reexports::client::{Connection, QueueHandle, globals};
 use tracing::warn;
+#[cfg(feature = "glib")]
+use winit_common::glib_bridge::GlibBridge;
 use winit_core::application::ApplicationHandler;
 use winit_core::cursor::{CustomCursor as CoreCustomCursor, CustomCursorSource};
 use winit_core::error::{EventLoopError, NotSupportedError, OsError, RequestError};
@@ -74,6 +76,9 @@ pub struct EventLoop {
     // XXX drop after everything else, just to be safe.
     /// Calloop's event loop.
     event_loop: calloop::EventLoop<'static, WinitState>,
+
+    #[cfg(feature = "glib")]
+    glib: GlibBridge<WinitState>,
 
     pump_event_notifier: Option<PumpEventNotifier>,
 }
@@ -163,6 +168,8 @@ impl EventLoop {
             wayland_dispatcher,
             event_loop,
             active_event_loop,
+            #[cfg(feature = "glib")]
+            glib: GlibBridge::default(),
             pump_event_notifier: None,
         };
 
@@ -269,6 +276,22 @@ impl EventLoop {
                 return;
             }
 
+            #[cfg(feature = "glib")]
+            {
+                if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                    warn!("Failed to refresh glib: {e}");
+                }
+                timeout = min_timeout(self.glib.timeout(), timeout);
+
+                if self.glib.ready_now() {
+                    self.glib.drain();
+                    if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                        warn!("Failed to refresh glib after drain: {e}");
+                    }
+                    timeout = min_timeout(self.glib.timeout(), timeout);
+                }
+            }
+
             if let Err(error) = self.loop_dispatch(timeout) {
                 // NOTE We exit on errors from dispatches, since if we've got protocol error
                 // libwayland-client/wayland-rs will inform us anyway, but crashing downstream is
@@ -281,6 +304,9 @@ impl EventLoop {
                 self.set_exit_code(exit_code);
                 return;
             }
+
+            #[cfg(feature = "glib")]
+            self.glib.drain();
 
             // NB: `StartCause::Init` is handled as a special case and doesn't need
             // to be considered here
