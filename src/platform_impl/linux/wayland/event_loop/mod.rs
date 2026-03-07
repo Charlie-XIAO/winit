@@ -26,6 +26,8 @@ use crate::error::{EventLoopError, OsError as RootOsError};
 use crate::event::{Event, InnerSizeWriter, StartCause, WindowEvent};
 use crate::event_loop::{ActiveEventLoop as RootActiveEventLoop, ControlFlow, DeviceEvents};
 use crate::platform::pump_events::PumpStatus;
+#[cfg(feature = "glib")]
+use crate::platform_impl::common::glib_bridge::GlibBridge;
 use crate::platform_impl::platform::min_timeout;
 use crate::platform_impl::{
     ActiveEventLoop as PlatformActiveEventLoop, OsError, PlatformCustomCursor,
@@ -74,6 +76,9 @@ pub struct EventLoop<T: 'static> {
     // XXX drop after everything else, just to be safe.
     /// Calloop's event loop.
     event_loop: calloop::EventLoop<'static, WinitState>,
+
+    #[cfg(feature = "glib")]
+    glib: GlibBridge<WinitState>,
 
     pump_event_notifier: Option<PumpEventNotifier>,
 }
@@ -176,6 +181,8 @@ impl<T: 'static> EventLoop<T> {
                 p: PlatformActiveEventLoop::Wayland(window_target),
                 _marker: PhantomData,
             },
+            #[cfg(feature = "glib")]
+            glib: GlibBridge::default(),
             pump_event_notifier: None,
         };
 
@@ -286,6 +293,22 @@ impl<T: 'static> EventLoop<T> {
                 return;
             }
 
+            #[cfg(feature = "glib")]
+            {
+                if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                    warn!("Failed to refresh glib: {e}");
+                }
+                timeout = min_timeout(self.glib.timeout(), timeout);
+
+                if self.glib.ready_now() {
+                    self.glib.drain();
+                    if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                        warn!("Failed to refresh glib after drain: {e}");
+                    }
+                    timeout = min_timeout(self.glib.timeout(), timeout);
+                }
+            }
+
             if let Err(error) = self.loop_dispatch(timeout) {
                 // NOTE We exit on errors from dispatches, since if we've got protocol error
                 // libwayland-client/wayland-rs will inform us anyway, but crashing downstream is
@@ -298,6 +321,9 @@ impl<T: 'static> EventLoop<T> {
                 self.set_exit_code(exit_code);
                 return;
             }
+
+            #[cfg(feature = "glib")]
+            self.glib.drain();
 
             // NB: `StartCause::Init` is handled as a special case and doesn't need
             // to be considered here

@@ -29,6 +29,8 @@ use crate::error::{EventLoopError, OsError as RootOsError};
 use crate::event::{Event, StartCause, WindowEvent};
 use crate::event_loop::{ActiveEventLoop as RootAEL, ControlFlow, DeviceEvents, EventLoopClosed};
 use crate::platform::pump_events::PumpStatus;
+#[cfg(feature = "glib")]
+use crate::platform_impl::common::glib_bridge::GlibBridge;
 use crate::platform_impl::common::xkb::Context;
 use crate::platform_impl::platform::{min_timeout, WindowId};
 use crate::platform_impl::{
@@ -152,6 +154,9 @@ pub struct EventLoop<T: 'static> {
 
     /// The current state of the event loop.
     state: EventLoopState,
+
+    #[cfg(feature = "glib")]
+    glib: GlibBridge<EventLoopState>,
 }
 
 type ActivationToken = (WindowId, crate::event_loop::AsyncRequestSerial);
@@ -364,6 +369,8 @@ impl<T: 'static> EventLoop<T> {
             user_receiver: PeekableReceiver::from_recv(user_channel),
             user_sender,
             state: EventLoopState { x11_readiness: Readiness::EMPTY },
+            #[cfg(feature = "glib")]
+            glib: GlibBridge::default(),
         }
     }
 
@@ -463,6 +470,22 @@ impl<T: 'static> EventLoop<T> {
             min_timeout(control_flow_timeout, timeout)
         };
 
+        #[cfg(feature = "glib")]
+        {
+            if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                warn!("Failed to refresh glib: {e}");
+            }
+            timeout = min_timeout(self.glib.timeout(), timeout);
+
+            if self.glib.ready_now() {
+                self.glib.drain();
+                if let Err(e) = self.glib.refresh(&self.event_loop.handle()) {
+                    warn!("Failed to refresh glib after drain: {e}");
+                }
+                timeout = min_timeout(self.glib.timeout(), timeout);
+            }
+        }
+
         self.state.x11_readiness = Readiness::EMPTY;
         if let Err(error) =
             self.event_loop.dispatch(timeout, &mut self.state).map_err(std::io::Error::from)
@@ -472,6 +495,9 @@ impl<T: 'static> EventLoop<T> {
             self.set_exit_code(exit_code);
             return;
         }
+
+        #[cfg(feature = "glib")]
+        self.glib.drain();
 
         // NB: `StartCause::Init` is handled as a special case and doesn't need
         // to be considered here
